@@ -50,8 +50,8 @@ intervened. Here's what is different between the party and final versions:
   Tested to work on ZX Spectrum Next KS2, KS1 / clones (N-GO, Xberry Pi), 
 also on Next-alikes like Mister's ZX Spectrum Next core.
 
-  Pouet link: https://www.pouet.net/prod.php?which=101337
-  Link to Youtube video: https://youtu.be/73S-f-YqT24
+  Pouet link: https://www.pouet.net/prod.php?which=101337 \
+  Link to Youtube video: https://youtu.be/73S-f-YqT24 \
   Sources are available and hereby placed in the public domain.
 
   Full credits:
