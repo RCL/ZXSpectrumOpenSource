@@ -28,6 +28,10 @@
   It doesn't snow in winter here, so I decided to add some. But it might be too
 too much (let it snow for at least 5 minutes). Also enjoy a PSG player in 1k ;)
 
+  Pouet: https://www.pouet.net/prod.php?which=102925 \
+  Youtube: https://www.youtube.com/watch?v=UWLeWpNl6aw \
+  These sources are hereby placed in the public domain.
+
 ### How to run
 
   - This intro is 128K only. Works in USR0 mode too ofc. 
@@ -73,8 +77,6 @@ of the PT2 track are used in the 1K intro.
   Full credits:
   - Code - RCL
   - Music - AY track by RCL, conversion of an unknown MOD file by ???
-
-  Expect the sources on github shortly after the party.
 
  -RCL, 2025-01-03
 ------------------ ----- ---- --- -- -  
