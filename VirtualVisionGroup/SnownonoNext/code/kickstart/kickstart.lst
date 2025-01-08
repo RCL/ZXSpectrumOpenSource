@@ -1,0 +1,100 @@
+# file opened: ..\code\kickstart\kickstart.asm
+ 1    0000                  device ZXSPECTRUMNEXT
+ 2    0000
+ 3    0000              USE_UPKR EQU 0
+ 4    0000
+ 5    0000                  org $2000	; origin of all .dot files
+ 6    2000
+ 7    2000              overall_start:
+ 8    2000
+ 9    2000 F3               di
+10    2001
+11    2001                  if (USE_UPKR)
+12    2001 ~                ld ix, compressed
+13    2001 ~                ld de, #8000
+14    2001 ~                push de
+15    2001 ~                exx
+16    2001 ~                ; intentional fall-through to upkr.unpack
+17    2001 ~
+18    2001 ~                    ; upkr 'allocates' PROBS array without really allocating
+19    2001 ~            UPKR_PROBS_ORIGIN EQU #5900
+20    2001 ~                include "unpack.asm"
+21    2001 ~
+22    2001 ~            compressed:
+23    2001 ~                incbin "../../output/snownononext_main.bin.upk"
+24    2001 ~
+25    2001                  else
+26    2001
+27    2001 21 4B 20         ld hl, compressed
+28    2004 11 00 80         ld de, #8000
+29    2007 D5               push de
+30    2008
+31    2008              ; ZX0 decoder by Einar Saukas & Urusergi
+32    2008              dzx0_standard:
+33    2008 01 FF FF             ld      bc, $ffff               ; preserve default offset 1
+34    200B C5                   push    bc
+35    200C 03                   inc     bc
+36    200D 7A                   ld      a, d    ; we know it's $80
+37    200E              dzx0s_literals:
+38    200E CD 3C 20             call    dzx0s_elias             ; obtain length
+39    2011 ED B0                ldir                            ; copy literals
+40    2013 87                   add     a, a                    ; copy from last offset or new offset?
+41    2014 38 0D                jr      c, dzx0s_new_offset
+42    2016 CD 3C 20             call    dzx0s_elias             ; obtain length
+43    2019              dzx0s_copy:
+44    2019 E3                   ex      (sp), hl                ; preserve source, restore offset
+45    201A E5                   push    hl                      ; preserve offset
+46    201B 19                   add     hl, de                  ; calculate destination - offset
+47    201C ED B0                ldir                            ; copy from offset
+48    201E E1                   pop     hl                      ; restore offset
+49    201F E3                   ex      (sp), hl                ; preserve offset, restore source
+50    2020 87                   add     a, a                    ; copy from literals or new offset?
+51    2021 30 EB                jr      nc, dzx0s_literals
+52    2023              dzx0s_new_offset:
+53    2023 C1                   pop     bc                      ; discard last offset
+54    2024 0E FE                ld      c, $fe                  ; prepare negative offset
+55    2026 CD 3D 20             call    dzx0s_elias_loop        ; obtain offset MSB
+56    2029 0C                   inc     c
+57    202A C8                   ret     z                       ; check end marker
+58    202B 41                   ld      b, c
+59    202C 4E                   ld      c, (hl)                 ; obtain offset LSB
+60    202D 23                   inc     hl
+61    202E CB 18                rr      b                       ; last offset bit becomes first length bit
+62    2030 CB 19                rr      c
+63    2032 C5                   push    bc                      ; preserve new offset
+64    2033 01 01 00             ld      bc, 1                   ; obtain length
+65    2036 D4 44 20             call    nc, dzx0s_elias_backtrack
+66    2039 03                   inc     bc
+67    203A 18 DD                jr      dzx0s_copy
+68    203C              dzx0s_elias:
+69    203C 0C                   inc     c                       ; interlaced Elias gamma coding
+70    203D              dzx0s_elias_loop:
+71    203D 87                   add     a, a
+72    203E 20 03                jr      nz, dzx0s_elias_skip
+73    2040 7E                   ld      a, (hl)                 ; load another group of 8 bits
+74    2041 23                   inc     hl
+75    2042 17                   rla
+76    2043              dzx0s_elias_skip:
+77    2043 D8                   ret     c
+78    2044              dzx0s_elias_backtrack:
+79    2044 87                   add     a, a
+80    2045 CB 11                rl      c
+81    2047 CB 10                rl      b
+82    2049 18 F2                jr      dzx0s_elias_loop
+83    204B
+84    204B              compressed:
+85    204B                  incbin "../../output/snownononext_main.bin.zx0"
+86    23FF                  endif
+87    23FF
+88    23FF              overall_size = $ - overall_start
+89    23FF
+90    23FF                  SAVEBIN "snownononext.dot", $2000, $-$2000
+91    23FF
+92    23FF                  ; this is for a quick dev iteration only
+93    23FF                  SAVENEX OPEN "snownononext.nex", overall_start, $7F40
+94    23FF                  SAVENEX CORE 3, 0, 0
+95    23FF                  SAVENEX CFG 0, 0, 1, 0
+96    23FF                  SAVENEX AUTO
+97    23FF                  SAVENEX CLOSE
+98    23FF
+# file closed: ..\code\kickstart\kickstart.asm

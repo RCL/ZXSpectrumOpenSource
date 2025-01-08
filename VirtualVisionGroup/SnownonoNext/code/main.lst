@@ -1,0 +1,1116 @@
+# file opened: ..\code\main.asm
+  1   0000                  device ZXSPECTRUMNEXT
+  2   0000
+  3   0000                  include "constants.i.asm"
+# file opened: ..\code\constants.i.asm
+  1+  0000
+  2+  0000              ; ----- Colour palette (ULA)
+  3+  0000              BLACK           equ 0
+  4+  0000              BLUE            equ 1
+  5+  0000              RED             equ 2
+  6+  0000              MAGENTA         equ 3
+  7+  0000              GREEN           equ 4
+  8+  0000              CYAN            equ 5
+  9+  0000              YELLOW          equ 6
+ 10+  0000              WHITE           equ 7
+ 11+  0000              P_BLACK         equ 0
+ 12+  0000              P_BLUE          equ 1<<3
+ 13+  0000              P_RED           equ 2<<3
+ 14+  0000              P_MAGENTA       equ 3<<3
+ 15+  0000              P_GREEN         equ 4<<3
+ 16+  0000              P_CYAN          equ 5<<3
+ 17+  0000              P_YELLOW        equ 6<<3
+ 18+  0000              P_WHITE         equ 7<<3
+ 19+  0000              ; ----- Attribs
+ 20+  0000              A_FLASH         equ 128
+ 21+  0000              A_BRIGHT        equ 64
+ 22+  0000              ;----------------------------------------------
+ 23+  0000              BIT_UP          equ 4   ; 16
+ 24+  0000              BIT_DOWN        equ 5   ; 32
+ 25+  0000              BIT_LEFT        equ 6   ; 64
+ 26+  0000              BIT_RIGHT       equ 7   ; 128
+ 27+  0000
+ 28+  0000              DIR_NONE        equ %00000000
+ 29+  0000              DIR_UP          equ %00010000
+ 30+  0000              DIR_DOWN        equ %00100000
+ 31+  0000              DIR_LEFT        equ %01000000
+ 32+  0000              DIR_RIGHT       equ %10000000
+ 33+  0000
+ 34+  0000              DIR_UP_I        equ %11101111
+ 35+  0000              DIR_DOWN_I      equ %11011111
+ 36+  0000              DIR_LEFT_I      equ %10111111
+ 37+  0000              DIR_RIGHT_I     equ %01111111
+ 38+  0000
+ 39+  0000              ;-----------------------------------------------------------------------------
+ 40+  0000              ;-- I/O ports - ZX Spectrum classic (48, 128, Timex, Pentagon, ...) ports
+ 41+  0000
+ 42+  0000              ULA_P_FE                        equ $FE     ; BORDER + MIC + BEEP + read Keyboard
+ 43+  0000              TIMEX_P_FF                      equ $FF     ; Timex video control port
+ 44+  0000
+ 45+  0000              ZX128_MEMORY_P_7FFD             equ $7FFD   ; ZX Spectrum 128 ports
+ 46+  0000              ZX128_MEMORY_P_DFFD             equ $DFFD
+ 47+  0000              ZX128P3_MEMORY_P_1FFD           equ $1FFD
+ 48+  0000
+ 49+  0000              AY_REG_P_FFFD                   equ $FFFD
+ 50+  0000              AY_DATA_P_BFFD                  equ $BFFD
+ 51+  0000
+ 52+  0000              Z80_DMA_PORT_DATAGEAR           equ $6B     ; on ZXN the zxnDMA handles this in zxnDMA mode
+ 53+  0000              Z80_DMA_PORT_MB02               equ $0B     ; on ZXN the zxnDMA handles this in Zilog mode
+ 54+  0000
+ 55+  0000              DIVMMC_CONTROL_P_E3             equ $E3
+ 56+  0000              SPI_CS_P_E7                     equ $E7
+ 57+  0000              SPI_DATA_P_EB                   equ $EB
+ 58+  0000
+ 59+  0000              KEMPSTON_MOUSE_X_P_FBDF         equ $FBDF
+ 60+  0000              KEMPSTON_MOUSE_Y_P_FFDF         equ $FFDF
+ 61+  0000              KEMPSTON_MOUSE_B_P_FADF         equ $FADF   ; kempston mouse wheel+buttons
+ 62+  0000
+ 63+  0000              KEMPSTON_JOY1_P_1F              equ $1F
+ 64+  0000              KEMPSTON_JOY2_P_37              equ $37
+ 65+  0000
+ 66+  0000              ;-----------------------------------------------------------------------------
+ 67+  0000              ;-- I/O ports - ZX Spectrum NEXT specific ports
+ 68+  0000
+ 69+  0000              TBBLUE_REGISTER_SELECT_P_243B   equ $243B
+ 70+  0000                  ; -- port $243B = 9275  Read+Write (detection bitmask: %0010_0100_0011_1011)
+ 71+  0000                  ;   -- selects NextREG mapped at port TBBLUE_REGISTER_ACCESS_P_253B
+ 72+  0000
+ 73+  0000              TBBLUE_REGISTER_ACCESS_P_253B   equ $253B
+ 74+  0000                  ; -- port $253B = 9531  Read?+Write? (detection bitmask: %0010_0101_0011_1011)
+ 75+  0000                  ;   -- data for selected NextREG (read/write depends on the register selected)
+ 76+  0000
+ 77+  0000              ; indexes into DAC_CHANNEL_* def-arrays, depending on the type of DAC you want to use
+ 78+  0000              DAC_GS_COVOX_INDEX              equ     1
+ 79+  0000              DAC_PENTAGON_ATM_INDEX          equ     2
+ 80+  0000              DAC_SPECDRUM_INDEX              equ     3
+ 81+  0000              DAC_SOUNDRIVE1_INDEX            equ     4
+ 82+  0000              DAC_SOUNDRIVE2_INDEX            equ     5
+ 83+  0000              DAC_COVOX_INDEX                 equ     6
+ 84+  0000              DAC_PROFI_COVOX_INDEX           equ     7
+ 85+  0000                  ; -- enable 8bit DACs with PERIPHERAL_3_NR_08, use DAC_*_INDEX to access particular set of ports
+ 86+  0000                  DEFARRAY    DAC_CHANNEL_A  @@,  @@, $FB, $DF, $1F, $F1,  @@, $3F
+ 87+  0000                  DEFARRAY    DAC_CHANNEL_B  @@, $B3,  @@,  @@, $0F, $F3, $0F,  @@
+ 88+  0000                  DEFARRAY    DAC_CHANNEL_C  @@, $B3,  @@,  @@, $4F, $F9, $4F,  @@
+ 89+  0000                  DEFARRAY    DAC_CHANNEL_D  @@,  @@, $FB, $DF, $5F, $FB,  @@, $5F
+ 90+  0000                  ; -- like for example: ld bc,DAC_CHANNEL_B[DAC_PROFI_COVOX_INDEX]
+ 91+  0000
+ 92+  0000              I2C_SCL_P_103B                  equ $103B   ; i2c bus port (clock) (write only?)
+ 93+  0000              I2C_SDA_P_113B                  equ $113B   ; i2c bus port (data) (read+write)
+ 94+  0000              UART_TX_P_133B                  equ $133B   ; UART tx port (read+write)
+ 95+  0000              UART_RX_P_143B                  equ $143B   ; UART rx port (read+write)
+ 96+  0000              UART_CTRL_P_153B                equ $153B   ; UART control port (read+write)
+ 97+  0000
+ 98+  0000              ZILOG_DMA_P_0B                  equ $0B
+ 99+  0000              ZXN_DMA_P_6B                    equ $6B
+100+  0000                  ; -- port $6B = 107 Read+Write (detection bitmask: %xxxx_xxxx_0110_1011)
+101+  0000                  ;   - The zxnDMA is mostly compatible with Zilog DMA chip (Z8410) (at least
+102+  0000                  ;     as far as old ZX apps are concerned), but has many modifications.
+103+  0000                  ;   - core3.1.1 update - Zilog/zxnDMA mode is now selected by port number, not PERIPHERAL_2_NR_06!
+104+  0000                  ;   - core3.0 update - (REMOVED) specific behaviour details can be selected (PERIPHERAL_2_NR_06)
+105+  0000
+106+  0000              LAYER2_ACCESS_P_123B            equ $123B
+107+  0000                  ; -- port $123B = 4667 Read+Write (detection bitmask: %0001_0010_0011_1011)
+108+  0000                  ;   - see ports.txt or wiki for details (has become a bit more complex over time)
+109+  0000
+110+  0000              LAYER2_ACCESS_WRITE_OVER_ROM    equ $01     ; map Layer2 bank into ROM area (0000..3FFF) for WRITE-only (reads as ROM)
+111+  0000              LAYER2_ACCESS_L2_ENABLED        equ $02     ; enable Layer2 (make banks form nextreg $12 visible)
+112+  0000              LAYER2_ACCESS_READ_OVER_ROM     equ $04     ; map Layer2 bank into ROM area (0000..3FFF) for READ-only
+113+  0000              LAYER2_ACCESS_SHADOW_OVER_ROM   equ $08     ; bank selected by bits 6-7 is from "shadow Layer 2" banks range (nextreg $13)
+114+  0000              LAYER2_ACCESS_BANK_OFFSET       equ $10     ; bit 2-0 is bank offset for current active mapping +0..+7 (other bits are reserved, use 0)
+115+  0000              LAYER2_ACCESS_OVER_ROM_BANK_M   equ $C0     ; (mask of) value 0..3 selecting bank mapped for R/W (Nextreg $12 or $13)
+116+  0000              LAYER2_ACCESS_OVER_ROM_BANK_0   equ $00     ; screen lines 0..63    (256x192) or columns 0..63    (320x256) or columns 0..127   (640x256)
+117+  0000              LAYER2_ACCESS_OVER_ROM_BANK_1   equ $40     ; screen lines 64..127  (256x192) or columns 64..127  (320x256) or columns 128..255 (640x256)
+118+  0000              LAYER2_ACCESS_OVER_ROM_BANK_2   equ $80     ; screen lines 128..191 (256x192) or columns 128..191 (320x256) or columns 256..383 (640x256)
+119+  0000              LAYER2_ACCESS_OVER_ROM_48K      equ $C0     ; maps all 0..191 lines into $0000..$BFFF region (256x192) or 2/3 of columns in 320x256/640x256
+120+  0000
+121+  0000              SPRITE_STATUS_SLOT_SELECT_P_303B    equ $303B
+122+  0000                  ; -- port $303B = 12347  Read+Write (detection bitmask: %0011_0000_0011_1011)
+123+  0000                  ;   -- write:
+124+  0000                  ;     - sets both "sprite slot" (0..63) and "pattern slot" (0..63 +128)
+125+  0000                  ;     - once the sprite/pattern slots are set, they act independently and
+126+  0000                  ;     each port ($xx57 and $xx5B) will auto-increment its own slot index
+127+  0000                  ;     (to resync one can write to this port again).
+128+  0000                  ;     - the +128 flag will make the pattern upload start at byte 128 of pattern
+129+  0000                  ;     slot (second half of slot)
+130+  0000                  ;     - The sprite-slot (sprite-attributes) may be optionally interlinked with
+131+  0000                  ;     NextReg $34 (feature controlled by NextReg $34)
+132+  0000                  ;     - auto-increments of slot position from value 63 are officially
+133+  0000                  ;     "undefined behaviour", wrap to 0 is not guaranteed. (only setting slots
+134+  0000                  ;     explicitly back to valid 0..63 will make your code future-proof)
+135+  0000                  ;   -- read (will also reset both collision and max-sprites flags):
+136+  0000                  ;     - bit 1 = maximum sprites per line hit (set when sprite renderer ran
+137+  0000                  ;               out of time when preparing next scanline)
+138+  0000                  ;     - bit 0 = collision flag (set when any sprites draw non-transparent
+139+  0000                  ;               pixel at the same location)
+140+  0000                  ;     Both flags contain values for current scanline already at the beginning
+141+  0000                  ;     of scanline (sprite engine renders one line ahead into buffer and updates
+142+  0000                  ;     flags progressively as it renders the sprites)
+143+  0000              SPRITE_STATUS_MAXIMUM_SPRITES   equ $02
+144+  0000              SPRITE_STATUS_COLLISION         equ $01
+145+  0000              SPRITE_SLOT_SELECT_PATTERN_HALF equ 128     ; add it to 0..63 index to make pattern upload start at second half of pattern
+146+  0000
+147+  0000              SPRITE_ATTRIBUTE_P_57           equ $57
+148+  0000                  ; -- port $xx57 = 87 write-only (detection bitmask: %xxxx_xxxx_0101_0111)
+149+  0000                  ;  - writing 4 or 5 bytes long structures to control particular sprite
+150+  0000                  ;  - after 4/5 bytes block the sprite slot index is auto-incremented
+151+  0000                  ;  - for detailed documentation check official docs or wiki (too long)
+152+  0000
+153+  0000              SPRITE_PATTERN_P_5B             equ $5B
+154+  0000                  ; -- port $xx5B = 91 write-only (detection bitmask: %xxxx_xxxx_0101_1011)
+155+  0000                  ;  - each pattern slot is 256 bytes long = one 16x16 pattern of 8-bit pixels
+156+  0000                  ;    or two 16x16 patterns of 4-bit pixels.
+157+  0000                  ;  - Patterns are uploaded in "English" order (left to right, top to bottom),
+158+  0000                  ;    one byte encodes single pixel in 8 bit mode and two pixels in 4 bit
+159+  0000                  ;    mode (bits 7-4 are "left" pixel, 3-0 are "right" pixel)
+160+  0000                  ;  - pixels are offset (index) into active sprite palette
+161+  0000
+162+  0000              TURBO_SOUND_CONTROL_P_FFFD      equ $FFFD   ; write with bit 7 = 1 (port shared with AY)
+163+  0000
+164+  0000              ;-----------------------------------------------------------------------------
+165+  0000              ;-- NEXT HW Registers (NextReg)
+166+  0000              MACHINE_ID_NR_00                equ $00
+167+  0000              NEXT_VERSION_NR_01              equ $01
+168+  0000              NEXT_RESET_NR_02                equ $02
+169+  0000              MACHINE_TYPE_NR_03              equ $03
+170+  0000              ROM_MAPPING_NR_04               equ $04     ;In config mode, allows RAM to be mapped to ROM area.
+171+  0000              PERIPHERAL_1_NR_05              equ $05     ;Sets joystick mode, video frequency and Scandoubler.
+172+  0000              PERIPHERAL_2_NR_06              equ $06     ;Enables turbo/50Hz/60Hz keys, DivMMC, Multiface and audio (beep/AY)
+173+  0000              TURBO_CONTROL_NR_07             equ $07
+174+  0000              PERIPHERAL_3_NR_08              equ $08     ;ABC/ACB Stereo, Internal Speaker, SpecDrum, Timex Video Modes, Turbo Sound Next, RAM contention and [un]lock 128k paging.
+175+  0000              PERIPHERAL_4_NR_09              equ $09     ;Sets scanlines, AY mono output, Sprite-id lockstep, disables Kempston and divMMC ports.
+176+  0000              PERIPHERAL_5_NR_0A              equ $0A     ;Mouse buttons and DPI settings (core 3.1.5)
+177+  0000              NEXT_VERSION_MINOR_NR_0E        equ $0E
+178+  0000              ANTI_BRICK_NR_10                equ $10
+179+  0000              VIDEO_TIMING_NR_11              equ $11
+180+  0000              LAYER2_RAM_BANK_NR_12           equ $12     ;bank number where visible Layer 2 video memory begins.
+181+  0000              LAYER2_RAM_SHADOW_BANK_NR_13    equ $13     ;bank number for "shadow" write-over-rom mapping
+182+  0000              GLOBAL_TRANSPARENCY_NR_14       equ $14     ;Sets the color treated as transparent for ULA/Layer2/LoRes
+183+  0000              SPRITE_CONTROL_NR_15            equ $15     ;LoRes mode, Sprites configuration, layers priority
+184+  0000                  ; bit 7: enable LoRes mode
+185+  0000                  ; bit 6: sprite rendering (1=sprite 0 on top of other, 0=sprite 0 at bottom)
+186+  0000                  ; bit 5: If 1, the clipping works even in "over border" mode
+187+  0000                  ; 4-2: layers priority: 000=SLU, 001=LSU, 010=SUL, 011=LUS, 100=USL, 101=ULS, 110=S,mix(U+L), 111=S,mix(U+L-5)
+188+  0000                  ; bit 1: enable sprites over border, bit 0: show sprites
+189+  0000              LAYER2_XOFFSET_NR_16            equ $16
+190+  0000              LAYER2_YOFFSET_NR_17            equ $17
+191+  0000              CLIP_LAYER2_NR_18               equ $18
+192+  0000              CLIP_SPRITE_NR_19               equ $19
+193+  0000              CLIP_ULA_LORES_NR_1A            equ $1A
+194+  0000              CLIP_TILEMAP_NR_1B              equ $1B
+195+  0000              CLIP_WINDOW_CONTROL_NR_1C       equ $1C     ;set to 15 to reset all clip-window indices to 0
+196+  0000              VIDEO_LINE_MSB_NR_1E            equ $1E
+197+  0000              VIDEO_LINE_LSB_NR_1F            equ $1F
+198+  0000              VIDEO_INTERUPT_CONTROL_NR_22    equ $22     ;Controls the timing of raster interrupts and the ULA frame interrupt.
+199+  0000              VIDEO_INTERUPT_VALUE_NR_23      equ $23
+200+  0000              ULA_XOFFSET_NR_26               equ $26     ;since core 3.0
+201+  0000              ULA_YOFFSET_NR_27               equ $27     ;since core 3.0
+202+  0000              HIGH_ADRESS_KEYMAP_NR_28        equ $28     ;reads first 8b part of value written to $44 (even unfinished 16b write)
+203+  0000              LOW_ADRESS_KEYMAP_NR_29         equ $29
+204+  0000              HIGH_DATA_TO_KEYMAP_NR_2A       equ $2A
+205+  0000              LOW_DATA_TO_KEYMAP_NR_2B        equ $2B
+206+  0000              DAC_B_MIRROR_NR_2C              equ $2C     ;reads as MSB of Pi I2S left side sample, LSB waits at $2D
+207+  0000              DAC_AD_MIRROR_NR_2D             equ $2D     ;another alias for $2D, reads LSB of value initiated by $2C or $2E read
+208+  0000              SOUNDDRIVE_DF_MIRROR_NR_2D      equ $2D     ;Nextreg port-mirror of port 0xDF
+209+  0000              DAC_C_MIRROR_NR_2E              equ $2E     ;reads as MSB of Pi I2S right side sample, LSB waits at $2D
+210+  0000              TILEMAP_XOFFSET_MSB_NR_2F       equ $2F
+211+  0000              TILEMAP_XOFFSET_LSB_NR_30       equ $30
+212+  0000              TILEMAP_YOFFSET_NR_31           equ $31
+213+  0000              LORES_XOFFSET_NR_32             equ $32
+214+  0000              LORES_YOFFSET_NR_33             equ $33
+215+  0000              SPRITE_ATTR_SLOT_SEL_NR_34      equ $34     ;Sprite-attribute slot index for $35-$39/$75-$79 port $57 mirrors
+216+  0000              SPRITE_ATTR0_NR_35              equ $35     ;port $57 mirror in nextreg space (accessible to copper)
+217+  0000              SPRITE_ATTR1_NR_36              equ $36
+218+  0000              SPRITE_ATTR2_NR_37              equ $37
+219+  0000              SPRITE_ATTR3_NR_38              equ $38
+220+  0000              SPRITE_ATTR4_NR_39              equ $39
+221+  0000              PALETTE_INDEX_NR_40             equ $40     ;Chooses a ULANext palette number to configure.
+222+  0000              PALETTE_VALUE_NR_41             equ $41     ;Used to upload 8-bit colors to the ULANext palette.
+223+  0000              PALETTE_FORMAT_NR_42            equ $42     ;ink-mask for ULANext modes
+224+  0000              ENHANCED_ULA_INK_COLOR_MASK_42  equ PALETTE_FORMAT_NR_42
+225+  0000              PALETTE_CONTROL_NR_43           equ $43     ;Enables or disables ULANext interpretation of attribute values and toggles active palette.
+226+  0000              PALETTE_VALUE_9BIT_NR_44        equ $44     ;Holds the additional blue color bit for RGB333 color selection.
+227+  0000              TRANSPARENCY_FALLBACK_COL_NR_4A equ $4A     ;8-bit colour to be drawn when all layers are transparent
+228+  0000              SPRITE_TRANSPARENCY_I_NR_4B     equ $4B     ;index of transparent colour in sprite palette (only bottom 4 bits for 4-bit patterns)
+229+  0000              TILEMAP_TRANSPARENCY_I_NR_4C    equ $4C     ;index of transparent colour in tilemap graphics (only bottom 4 bits)
+230+  0000              MMU0_0000_NR_50                 equ $50     ;Set a Spectrum RAM page at position 0x0000 to 0x1FFF
+231+  0000              MMU1_2000_NR_51                 equ $51     ;Set a Spectrum RAM page at position 0x2000 to 0x3FFF
+232+  0000              MMU2_4000_NR_52                 equ $52     ;Set a Spectrum RAM page at position 0x4000 to 0x5FFF
+233+  0000              MMU3_6000_NR_53                 equ $53     ;Set a Spectrum RAM page at position 0x6000 to 0x7FFF
+234+  0000              MMU4_8000_NR_54                 equ $54     ;Set a Spectrum RAM page at position 0x8000 to 0x9FFF
+235+  0000              MMU5_A000_NR_55                 equ $55     ;Set a Spectrum RAM page at position 0xA000 to 0xBFFF
+236+  0000              MMU6_C000_NR_56                 equ $56     ;Set a Spectrum RAM page at position 0xC000 to 0xDFFF
+237+  0000              MMU7_E000_NR_57                 equ $57     ;Set a Spectrum RAM page at position 0xE000 to 0xFFFF
+238+  0000              COPPER_DATA_NR_60               equ $60
+239+  0000              COPPER_CONTROL_LO_NR_61         equ $61
+240+  0000              COPPER_CONTROL_HI_NR_62         equ $62
+241+  0000              COPPER_DATA_16B_NR_63           equ $63     ; same as $60, but waits for full 16b before write
+242+  0000              VIDEO_LINE_OFFSET_NR_64         equ $64     ; (core 3.1.5)
+243+  0000              ULA_CONTROL_NR_68               equ $68
+244+  0000              DISPLAY_CONTROL_NR_69           equ $69
+245+  0000              LORES_CONTROL_NR_6A             equ $6A
+246+  0000              TILEMAP_CONTROL_NR_6B           equ $6B
+247+  0000              TILEMAP_DEFAULT_ATTR_NR_6C      equ $6C
+248+  0000              TILEMAP_BASE_ADR_NR_6E          equ $6E     ;Tilemap base address of map
+249+  0000              TILEMAP_GFX_ADR_NR_6F           equ $6F     ;Tilemap definitions (graphics of tiles)
+250+  0000              LAYER2_CONTROL_NR_70            equ $70
+251+  0000              LAYER2_XOFFSET_MSB_NR_71        equ $71     ; for 320x256 and 640x256 L2 modes (core 3.0.6+)
+252+  0000              SPRITE_ATTR0_INC_NR_75          equ $75     ;port $57 mirror in nextreg space (accessible to copper) (slot index++)
+253+  0000              SPRITE_ATTR1_INC_NR_76          equ $76
+254+  0000              SPRITE_ATTR2_INC_NR_77          equ $77
+255+  0000              SPRITE_ATTR3_INC_NR_78          equ $78
+256+  0000              SPRITE_ATTR4_INC_NR_79          equ $79
+257+  0000              USER_STORAGE_0_NR_7F            equ $7F
+258+  0000              EXPANSION_BUS_ENABLE_NR_80      equ $80
+259+  0000              EXPANSION_BUS_CONTROL_NR_81     equ $81
+260+  0000              INTERNAL_PORT_DECODING_0_NR_82  equ $82     ;bits 0-7
+261+  0000              INTERNAL_PORT_DECODING_1_NR_83  equ $83     ;bits 8-15
+262+  0000              INTERNAL_PORT_DECODING_2_NR_84  equ $84     ;bits 16-23
+263+  0000              INTERNAL_PORT_DECODING_3_NR_85  equ $85     ;bits 24-31
+264+  0000              EXPANSION_BUS_DECODING_0_NR_86  equ $86     ;bits 0-7 mask
+265+  0000              EXPANSION_BUS_DECODING_1_NR_87  equ $87     ;bits 8-15 mask
+266+  0000              EXPANSION_BUS_DECODING_2_NR_88  equ $88     ;bits 16-23 mask
+267+  0000              EXPANSION_BUS_DECODING_3_NR_89  equ $89     ;bits 24-31 mask
+268+  0000              EXPANSION_BUS_PROPAGATE_NR_8A   equ $8A     ;Monitoring internal I/O or adding external keyboard
+269+  0000              ALTERNATE_ROM_NR_8C             equ $8C     ;Enable alternate ROM or lock 48k ROM
+270+  0000              ZX_MEM_MAPPING_NR_8E            equ $8E     ;shortcut to set classic zx128+3 memory model at one place
+271+  0000              PI_GPIO_OUT_ENABLE_0_NR_90      equ $90     ;pins 0-7
+272+  0000              PI_GPIO_OUT_ENABLE_1_NR_91      equ $91     ;pins 8-15
+273+  0000              PI_GPIO_OUT_ENABLE_2_NR_92      equ $92     ;pins 16-23
+274+  0000              PI_GPIO_OUT_ENABLE_3_NR_93      equ $93     ;pins 24-27
+275+  0000              PI_GPIO_0_NR_98                 equ $98     ;pins 0-7
+276+  0000              PI_GPIO_1_NR_99                 equ $99     ;pins 8-15
+277+  0000              PI_GPIO_2_NR_9A                 equ $9A     ;pins 16-23
+278+  0000              PI_GPIO_3_NR_9B                 equ $9B     ;pins 24-27
+279+  0000              PI_PERIPHERALS_ENABLE_NR_A0     equ $A0
+280+  0000              PI_I2S_AUDIO_CONTROL_NR_A2      equ $A2
+281+  0000              ;PI_I2S_CLOCK_DIVIDE_NR_A3       equ $A3    ; REMOVED in core 3.1.5 (no more master-mode)
+282+  0000              ESP_WIFI_GPIO_OUTPUT_NR_A8      equ $A8
+283+  0000              ESP_WIFI_GPIO_NR_A9             equ $A9
+284+  0000              EXTENDED_KEYS_0_NR_B0           equ $B0     ;read Next compound keys as standalone keys (outside of zx48 matrix)
+285+  0000              EXTENDED_KEYS_1_NR_B1           equ $B1     ;read Next compound keys as standalone keys (outside of zx48 matrix)
+286+  0000              ;DIVMMC_TRAP_ENABLE_1_NR_B2      equ $B2    ; NOT IMPLEMENTED in core yet (as of 3.1.4), may happen in future
+287+  0000              ;DIVMMC_TRAP_ENABLE_2_NR_B4      equ $B4    ; NOT IMPLEMENTED in core yet (as of 3.1.4), may happen in future
+288+  0000              DEBUG_LED_CONTROL_NR_FF         equ $FF     ;Turns debug LEDs on and off on TBBlue implementations that have them.
+289+  0000
+290+  0000              ; RCL added this on 2024-11-10
+291+  0000              INTERRUPT_CONTROL_C0        equ $C0
+292+  0000              INTERRUPT_ENABLE_MASK_0_C4  equ $C4
+293+  0000              INTERRUPT_ENABLE_MASK_1_C5  equ $C5
+294+  0000              INTERRUPT_ENABLE_MASK_2_C6  equ $C6
+295+  0000
+296+  0000              ; RCL added 2024-11-15
+297+  0000              TIMEX_MODE_CONTROL_FF       equ $FF
+298+  0000
+299+  0000              ;-----------------------------------------------------------------------------
+300+  0000              ;-- common memory addresses
+301+  0000              MEM_ROM_CHARS_3C00              equ $3C00   ; actual chars start at $3D00 with space
+302+  0000              MEM_ZX_SCREEN_4000              equ $4000
+303+  0000              MEM_ZX_ATTRIB_5800              equ $5800
+304+  0000              MEM_LORES0_4000                 equ $4000
+305+  0000              MEM_LORES1_6000                 equ $6000
+306+  0000              MEM_TIMEX_SCR0_4000             equ $4000
+307+  0000              MEM_TIMEX_SCR1_6000             equ $6000
+308+  0000
+309+  0000              ;-----------------------------------------------------------------------------
+310+  0000              ;-- Copper commands
+311+  0000              COPPER_NOOP                     equ %00000000
+312+  0000              COPPER_WAIT_H                   equ %1'000000'0
+313+  0000              COPPER_HALT_B                   equ $FF   ; 2x $FF = wait for (511,63) = infinite wait
+314+  0000
+315+  0000              ;-----------------------------------------------------------------------------
+316+  0000              ; DMA (Register 6)
+317+  0000              DMA_RESET                   equ $C3
+318+  0000              DMA_RESET_PORT_A_TIMING     equ $C7
+319+  0000              DMA_RESET_PORT_B_TIMING     equ $CB
+320+  0000              DMA_LOAD                    equ $CF
+321+  0000              DMA_CONTINUE                equ $D3
+322+  0000              DMA_DISABLE_INTERUPTS       equ $AF
+323+  0000              DMA_ENABLE_INTERUPTS        equ $AB
+324+  0000              DMA_RESET_DISABLE_INTERUPTS equ $A3
+325+  0000              DMA_ENABLE_AFTER_RETI       equ $B7
+326+  0000              DMA_READ_STATUS_BYTE        equ $BF
+327+  0000              DMA_REINIT_STATUS_BYTE      equ $8B
+328+  0000              DMA_START_READ_SEQUENCE     equ $A7
+329+  0000              DMA_FORCE_READY             equ $B3
+330+  0000              DMA_DISABLE                 equ $83
+331+  0000              DMA_ENABLE                  equ $87
+332+  0000              DMA_READ_MASK_FOLLOWS       equ $BB
+333+  0000
+334+  0000              ; About UART<->ESP baund rate from AA:
+335+  0000              ;
+336+  0000              ; It's very easy to compute the prescalar.
+337+  0000              ; 1. Read nextreg 0x11 to find out the video timing the system is using 0-7
+338+  0000              ; 2. Take the associated actual system clock from this table:define(__CLK_28_0', 28000000)
+339+  0000              ; define(CLK_28_1', 28571429)
+340+  0000              ; define(`CLK_28_2', 29464286)
+341+  0000              ; define(__CLK_28_3', 30000000)
+342+  0000              ; define(CLK_28_4', 31000000)
+343+  0000              ; define(`CLK_28_5', 32000000)
+344+  0000              ; define(__CLK_28_6', 33000000)
+345+  0000              ; define(__CLK_28_7', 27000000)
+346+  0000              ; 3. Divide the clock by the baud rate you want to find the 14-bit prescalar value.
+347+  0000              ; That's it.
+348+  0000
+# file closed: ..\code\constants.i.asm
+  4   0000
+  5   0000                                      ; pages 16-95 should be usable on any Next machine, even the first unexpanded ones with 768KB
+  6   0000              FIRST_NEXT_PAGE_USED    EQU 16
+  7   0000              LAST_NEXT_PAGE_USED     EQU 95
+  8   0000              NUM_NEXT_PAGES_USED     EQU (LAST_NEXT_PAGE_USED - FIRST_NEXT_PAGE_USED + 1)
+  9   0000
+ 10   0000
+ 11   0000              NUM_SNOWFLAKES          EQU 940     ; 50Hz mode can do more, but I want to support 60Hz
+ 12   0000
+ 13   0000              NUM_SNOWFLAKES_LO       EQU (low NUM_SNOWFLAKES)
+ 14   0000              NUM_SNOWFLAKES_HI       EQU (high NUM_SNOWFLAKES)
+ 15   0000
+ 16   0000              NO_MUSIC                EQU 0
+ 17   0000              PROFILE_FRAME           EQU 0
+ 18   0000
+ 19   0000              ; Music parameters
+ 20   0000              NumRegistersSaved       EQU 12
+ 21   0000
+ 22   0000
+ 23   0000                  STRUCT  Snowflake
+ 24   0000 ~            YPos            dw 0
+ 25   0000 ~            YSpeed          dw 0
+ 26   0000 ~            XPos            dw 0
+ 27   0000                  ENDS
+ 28   0000
+ 29   0000                  ; pages in a 8K Next page to address $E000-$FFFF that is in the A register
+ 30   0000                  MACRO SetPageInA
+ 31   0000 ~                    nextreg MMU7_E000_NR_57, a
+ 32   0000                  ENDM
+ 33   0000
+ 34   0000                  ; Resets a snowflake. IX - pointer to the current snowflake structure
+ 35   0000                  ; Made a macro so exact same code can be used twice and compress better
+ 36   0000                  ; Keeps B intact
+ 37   0000                  MACRO ResetSnowflake
+ 38   0000 ~                    xor a
+ 39   0000 ~                    ld (ix + Snowflake.XPos), a
+ 40   0000 ~
+ 41   0000 ~                    call rnd
+ 42   0000 ~                    ld (ix + Snowflake.YPos), a
+ 43   0000 ~                    call rnd
+ 44   0000 ~                    and $3f
+ 45   0000 ~                    ld (ix + Snowflake.YPos + 1), a
+ 46   0000 ~
+ 47   0000 ~                    call rnd
+ 48   0000 ~                    ld (ix + Snowflake.XPos + 1), a
+ 49   0000 ~
+ 50   0000 ~                    call rnd
+ 51   0000 ~                    ld l, a
+ 52   0000 ~                    and $1
+ 53   0000 ~                    ld h, a
+ 54   0000 ~                    add hl, hl
+ 55   0000 ~                    ld (ix + Snowflake.YSpeed), l
+ 56   0000 ~                    ld (ix + Snowflake.YSpeed + 1), h
+ 57   0000                  ENDM
+ 58   0000
+ 59   0000                  ; a separate macro just to see what compresses better, a row of inc or add
+ 60   0000                  MACRO AdvanceToNextSnowflake
+ 61   0000 ~                    if (1)  ; compresses better
+ 62   0000 ~                        inc ix
+ 63   0000 ~                        inc ix
+ 64   0000 ~                        inc ix
+ 65   0000 ~                        inc ix
+ 66   0000 ~                        inc ix
+ 67   0000 ~                        inc ix
+ 68   0000 ~                    else
+ 69   0000 ~                        ld de, 6
+ 70   0000 ~                        add ix, de
+ 71   0000 ~                    endif
+ 72   0000                  ENDM
+ 73   0000
+ 74   0000                  org #8000
+ 75   8000
+ 76   8000              savebin_begin:
+ 77   8000
+ 78   8000                  ; don't care about returning to the OS...
+ 79   8000 31 FF 7F         ld sp, $7fff
+ 80   8003
+ 81   8003                  ; TURBO!
+ 82   8003 ED 91 07 03      nextreg TURBO_CONTROL_NR_07, 3  ; 28 Mhz
+ 83   8007
+ 84   8007                  ; --------------------------------------------------------------------------------
+ 85   8007                  ; clear the pages
+ 86   8007 3E 50            ld a, NUM_NEXT_PAGES_USED
+ 87   8009              ClearLoop:
+ 88   8009 C6 0F                add FIRST_NEXT_PAGE_USED - 1    ; because we will never hit a 0 here
+ 89   800B                      SetPageInA
+ 89   800B ED 92 57    >        nextreg MMU7_E000_NR_57, a
+ 90   800E D6 0F                sub FIRST_NEXT_PAGE_USED - 1
+ 91   8010 21 00 E0             ld hl, $E000
+ 92   8013 54                   ld d, h
+ 93   8014 5D                   ld e, l
+ 94   8015 1C                   inc e
+ 95   8016 01 FF 1F             ld bc, #1fff
+ 96   8019 75                   ld (hl), l
+ 97   801A ED B0                ldir
+ 98   801C 3D               dec a
+ 99   801D 20 EA            jr nz, ClearLoop
+100   801F
+101   801F                  ; --------------------------------------------------------------------------------
+102   801F                  ; setup the snow
+103   801F DD 21 00 C3      ld ix, SnowflakesBuffer
+104   8023 06 03            ld b, NUM_SNOWFLAKES_HI
+105   8025              SnowflakeResetLoopHi:
+106   8025 C5                   push bc
+107   8026 06 AC                ld b, NUM_SNOWFLAKES_LO
+108   8028              SnowflakeResetLoopLo:
+109   8028                          ResetSnowflake
+109   8028 AF          >        xor a
+109   8029 DD 77 04    >        ld (ix + Snowflake.XPos), a
+109   802C             >
+109   802C CD FE 82    >        call rnd
+109   802F DD 77 00    >        ld (ix + Snowflake.YPos), a
+109   8032 CD FE 82    >        call rnd
+109   8035 E6 3F       >        and $3f
+109   8037 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+109   803A             >
+109   803A CD FE 82    >        call rnd
+109   803D DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+109   8040             >
+109   8040 CD FE 82    >        call rnd
+109   8043 6F          >        ld l, a
+109   8044 E6 01       >        and $1
+109   8046 67          >        ld h, a
+109   8047 29          >        add hl, hl
+109   8048 DD 75 02    >        ld (ix + Snowflake.YSpeed), l
+109   804B DD 74 03    >        ld (ix + Snowflake.YSpeed + 1), h
+110   804E                          AdvanceToNextSnowflake
+110   804E             >        if (1)  ; compresses better
+110   804E DD 23       >            inc ix
+110   8050 DD 23       >            inc ix
+110   8052 DD 23       >            inc ix
+110   8054 DD 23       >            inc ix
+110   8056 DD 23       >            inc ix
+110   8058 DD 23       >            inc ix
+110   805A             >        else
+110   805A ~           >            ld de, 6
+110   805A ~           >            add ix, de
+110   805A             >        endif
+111   805A 10 CC                djnz SnowflakeResetLoopLo
+112   805C C1                   pop bc
+113   805D 10 C6            djnz SnowflakeResetLoopHi
+114   805F
+115   805F                  ; --------------------------------------------------------------------------------
+116   805F                  ; Interrupt set up
+117   805F ED 91 C0 21      nextreg INTERRUPT_CONTROL_C0, (((low InterruptVectors) & %11100000) | 1)    ; set bits 3 of interrupt vector table and also IM2 mode
+118   8063 ED 91 C4 81      nextreg INTERRUPT_ENABLE_MASK_0_C4, $81 ; Enables ULA and INT interrupts only
+119   8067 ED 91 C6 00      nextreg INTERRUPT_ENABLE_MASK_2_C6, 0
+120   806B
+121   806B                  ; check what mode we're in
+122   806B 3E 05            ld a, $5
+123   806D 01 3B 24         ld bc, TBBLUE_REGISTER_SELECT_P_243B
+124   8070 ED 79            out (c), a
+125   8072
+126   8072 01 3B 25         ld bc, TBBLUE_REGISTER_ACCESS_P_253B
+127   8075 ED 78            in a, (c)
+128   8077
+129   8077                  ; see https://www.specnext.com/tbblue-io-port-system/ for nextreg 5 values
+130   8077 E6 04            and $04 ;   bit 2 - 0 == 50Hz, 1 == 60 Hz
+131   8079 20 05            jr nz, RunningIn60Hz
+132   807B
+133   807B                  ; patch the conditional logic to ignore each 6th update so it never does that (JR NZ to JR)
+134   807B 3E 18            ld a, $18
+135   807D 32 B6 80         ld (Skip6thUpdateIf60HzOp), a
+136   8080
+137   8080              RunningIn60Hz:
+138   8080 ED 91 C5 00      nextreg INTERRUPT_ENABLE_MASK_1_C5, 0       ; Disables CTC interrupt
+139   8084
+140   8084 3E C2            ld a, high InterruptVectors
+141   8086 ED 47            ld i, a
+142   8088 ED 5E            im 2
+143   808A
+144   808A                  ; -----------------------------------------------------
+145   808A                  ; minor music setup
+146   808A
+147   808A                  ; we know that in our track the whole value of reg 13 is 0x0E
+148   808A 3E 0D            ld a, 13
+149   808C 01 FD FF         ld bc, #fffd
+150   808F ED 79            out (c), a
+151   8091 3C               inc a
+152   8092 06 BF            ld b, #bf
+153   8094 ED 79            out (c), a
+154   8096
+155   8096                  ; -----------------------------------------------------
+156   8096                  ; screen setup
+157   8096
+158   8096 AF               xor a
+159   8097 D3 FE            out (#fe), a
+160   8099 01 00 18         ld bc, 6144
+161   809C 21 00 40         ld hl, #4000
+162   809F 54               ld d, h
+163   80A0 5D               ld e, l
+164   80A1 1C               inc e
+165   80A2 75               ld (hl), l
+166   80A3 ED B0            ldir
+167   80A5 36 47            ld (hl), #47
+168   80A7 01 FF 02         ld bc, 767
+169   80AA ED B0            ldir
+170   80AC
+171   80AC                  ; the rest of the work will be done in the interrupts
+172   80AC FB               ei
+173   80AD              EternalLoop:
+174   80AD 18 FE            jr $
+175   80AF
+176   80AF              ; ------------------------
+177   80AF              ; Default interrupt handler for unused interrupts
+178   80AF              DefaultInterruptHandler:
+179   80AF FB               ei
+180   80B0 ED 4D            reti
+181   80B2
+182   80B2              VBlankInterruptHandler:
+183   80B2                  if (PROFILE_FRAME)
+184   80B2 ~                    ld a, 7
+185   80B2 ~                    out (#fe), a
+186   80B2                  endif
+187   80B2
+188   80B2                  ; -------------------------------
+189   80B2                  ; music update
+190   80B2                  if (!NO_MUSIC)
+191   80B2 21 1A C2             ld hl, InterruptCtr
+192   80B5 35                   dec (hl)
+193   80B6              Skip6thUpdateIf60HzOp:          ; will be patched to JR in 50Hz
+194   80B6 20 06                jr nz, NoInterruptSkip
+195   80B8 3E 06                ld a, 6
+196   80BA 77                   ld (hl), a
+197   80BB C3 FD 81             jp SnowUpdate
+198   80BE
+199   80BE              NoInterruptSkip:
+200   80BE
+201   80BE              MusicPos equ $+1
+202   80BE 21 19 83             ld hl, MusicRegs - 1
+203   80C1 11 5A 88             ld de, MusicRegs + RegisterFileLength
+204   80C4 23                   inc hl
+205   80C5 B7                   or a
+206   80C6 ED 52                sbc hl, de
+207   80C8 19                   add hl, de
+208   80C9 38 0A                jr c, NoMusicReset
+209   80CB
+210   80CB 21 0C 82             ld hl, BufferDirChangeOp
+211   80CE 7E                   ld a, (hl)
+212   80CF EE 18                xor $18     ; This switches between JR and NOP, read the comment next to BufferDirChangeOp!
+213   80D1 77                   ld (hl), a
+214   80D2
+215   80D2 21 19 83             ld hl, MusicRegs - 1
+216   80D5              NoMusicReset:
+217   80D5 22 BF 80             ld (MusicPos), hl
+218   80D8
+219   80D8                      ; set AY regs
+220   80D8 EB                   ex de, hl
+221   80D9 21 40 C2             ld hl, PrevRegs
+222   80DC
+223   80DC AF                   xor a
+224   80DD                      MACRO MusicRegsUpdate
+225   80DD ~                        ld bc, #fffd
+226   80DD ~                        out (c), a
+227   80DD ~                        ex af, af'
+228   80DD ~                        ld a, (de)
+229   80DD ~                        cp (hl)
+230   80DD ~                        jr z, .SkipSameValue
+231   80DD ~                        ld b, #bf
+232   80DD ~                        out (c), a
+233   80DD ~                        ld (hl), a
+234   80DD ~            .SkipSameValue
+235   80DD ~                        ex af, af'
+236   80DD ~                        inc a
+237   80DD ~                        inc hl
+238   80DD ~                        ex de, hl
+239   80DD ~                        ld bc, RegisterFileLength
+240   80DD ~                        add hl, bc
+241   80DD ~                        ex de, hl
+242   80DD                      ENDM
+243   80DD                      DUP NumRegistersSaved
+244   80DD             >            MusicRegsUpdate
+244   80DD 01 FD FF    >            ld bc, #fffd
+244   80E0 ED 79       >            out (c), a
+244   80E2 08          >            ex af, af'
+244   80E3 1A          >            ld a, (de)
+244   80E4 BE          >            cp (hl)
+244   80E5 28 05       >            jr z, .SkipSameValue
+244   80E7 06 BF       >            ld b, #bf
+244   80E9 ED 79       >            out (c), a
+244   80EB 77          >            ld (hl), a
+244   80EC             >.SkipSameValue
+244   80EC 08          >            ex af, af'
+244   80ED 3C          >            inc a
+244   80EE 23          >            inc hl
+244   80EF EB          >            ex de, hl
+244   80F0 01 40 05    >            ld bc, RegisterFileLength
+244   80F3 09          >            add hl, bc
+244   80F4 EB          >            ex de, hl
+244   80F5             >            MusicRegsUpdate
+244   80F5 01 FD FF    >            ld bc, #fffd
+244   80F8 ED 79       >            out (c), a
+244   80FA 08          >            ex af, af'
+244   80FB 1A          >            ld a, (de)
+244   80FC BE          >            cp (hl)
+244   80FD 28 05       >            jr z, .SkipSameValue
+244   80FF 06 BF       >            ld b, #bf
+244   8101 ED 79       >            out (c), a
+244   8103 77          >            ld (hl), a
+244   8104             >.SkipSameValue
+244   8104 08          >            ex af, af'
+244   8105 3C          >            inc a
+244   8106 23          >            inc hl
+244   8107 EB          >            ex de, hl
+244   8108 01 40 05    >            ld bc, RegisterFileLength
+244   810B 09          >            add hl, bc
+244   810C EB          >            ex de, hl
+244   810D             >            MusicRegsUpdate
+244   810D 01 FD FF    >            ld bc, #fffd
+244   8110 ED 79       >            out (c), a
+244   8112 08          >            ex af, af'
+244   8113 1A          >            ld a, (de)
+244   8114 BE          >            cp (hl)
+244   8115 28 05       >            jr z, .SkipSameValue
+244   8117 06 BF       >            ld b, #bf
+244   8119 ED 79       >            out (c), a
+244   811B 77          >            ld (hl), a
+244   811C             >.SkipSameValue
+244   811C 08          >            ex af, af'
+244   811D 3C          >            inc a
+244   811E 23          >            inc hl
+244   811F EB          >            ex de, hl
+244   8120 01 40 05    >            ld bc, RegisterFileLength
+244   8123 09          >            add hl, bc
+244   8124 EB          >            ex de, hl
+244   8125             >            MusicRegsUpdate
+244   8125 01 FD FF    >            ld bc, #fffd
+244   8128 ED 79       >            out (c), a
+244   812A 08          >            ex af, af'
+244   812B 1A          >            ld a, (de)
+244   812C BE          >            cp (hl)
+244   812D 28 05       >            jr z, .SkipSameValue
+244   812F 06 BF       >            ld b, #bf
+244   8131 ED 79       >            out (c), a
+244   8133 77          >            ld (hl), a
+244   8134             >.SkipSameValue
+244   8134 08          >            ex af, af'
+244   8135 3C          >            inc a
+244   8136 23          >            inc hl
+244   8137 EB          >            ex de, hl
+244   8138 01 40 05    >            ld bc, RegisterFileLength
+244   813B 09          >            add hl, bc
+244   813C EB          >            ex de, hl
+244   813D             >            MusicRegsUpdate
+244   813D 01 FD FF    >            ld bc, #fffd
+244   8140 ED 79       >            out (c), a
+244   8142 08          >            ex af, af'
+244   8143 1A          >            ld a, (de)
+244   8144 BE          >            cp (hl)
+244   8145 28 05       >            jr z, .SkipSameValue
+244   8147 06 BF       >            ld b, #bf
+244   8149 ED 79       >            out (c), a
+244   814B 77          >            ld (hl), a
+244   814C             >.SkipSameValue
+244   814C 08          >            ex af, af'
+244   814D 3C          >            inc a
+244   814E 23          >            inc hl
+244   814F EB          >            ex de, hl
+244   8150 01 40 05    >            ld bc, RegisterFileLength
+244   8153 09          >            add hl, bc
+244   8154 EB          >            ex de, hl
+244   8155             >            MusicRegsUpdate
+244   8155 01 FD FF    >            ld bc, #fffd
+244   8158 ED 79       >            out (c), a
+244   815A 08          >            ex af, af'
+244   815B 1A          >            ld a, (de)
+244   815C BE          >            cp (hl)
+244   815D 28 05       >            jr z, .SkipSameValue
+244   815F 06 BF       >            ld b, #bf
+244   8161 ED 79       >            out (c), a
+244   8163 77          >            ld (hl), a
+244   8164             >.SkipSameValue
+244   8164 08          >            ex af, af'
+244   8165 3C          >            inc a
+244   8166 23          >            inc hl
+244   8167 EB          >            ex de, hl
+244   8168 01 40 05    >            ld bc, RegisterFileLength
+244   816B 09          >            add hl, bc
+244   816C EB          >            ex de, hl
+244   816D             >            MusicRegsUpdate
+244   816D 01 FD FF    >            ld bc, #fffd
+244   8170 ED 79       >            out (c), a
+244   8172 08          >            ex af, af'
+244   8173 1A          >            ld a, (de)
+244   8174 BE          >            cp (hl)
+244   8175 28 05       >            jr z, .SkipSameValue
+244   8177 06 BF       >            ld b, #bf
+244   8179 ED 79       >            out (c), a
+244   817B 77          >            ld (hl), a
+244   817C             >.SkipSameValue
+244   817C 08          >            ex af, af'
+244   817D 3C          >            inc a
+244   817E 23          >            inc hl
+244   817F EB          >            ex de, hl
+244   8180 01 40 05    >            ld bc, RegisterFileLength
+244   8183 09          >            add hl, bc
+244   8184 EB          >            ex de, hl
+244   8185             >            MusicRegsUpdate
+244   8185 01 FD FF    >            ld bc, #fffd
+244   8188 ED 79       >            out (c), a
+244   818A 08          >            ex af, af'
+244   818B 1A          >            ld a, (de)
+244   818C BE          >            cp (hl)
+244   818D 28 05       >            jr z, .SkipSameValue
+244   818F 06 BF       >            ld b, #bf
+244   8191 ED 79       >            out (c), a
+244   8193 77          >            ld (hl), a
+244   8194             >.SkipSameValue
+244   8194 08          >            ex af, af'
+244   8195 3C          >            inc a
+244   8196 23          >            inc hl
+244   8197 EB          >            ex de, hl
+244   8198 01 40 05    >            ld bc, RegisterFileLength
+244   819B 09          >            add hl, bc
+244   819C EB          >            ex de, hl
+244   819D             >            MusicRegsUpdate
+244   819D 01 FD FF    >            ld bc, #fffd
+244   81A0 ED 79       >            out (c), a
+244   81A2 08          >            ex af, af'
+244   81A3 1A          >            ld a, (de)
+244   81A4 BE          >            cp (hl)
+244   81A5 28 05       >            jr z, .SkipSameValue
+244   81A7 06 BF       >            ld b, #bf
+244   81A9 ED 79       >            out (c), a
+244   81AB 77          >            ld (hl), a
+244   81AC             >.SkipSameValue
+244   81AC 08          >            ex af, af'
+244   81AD 3C          >            inc a
+244   81AE 23          >            inc hl
+244   81AF EB          >            ex de, hl
+244   81B0 01 40 05    >            ld bc, RegisterFileLength
+244   81B3 09          >            add hl, bc
+244   81B4 EB          >            ex de, hl
+244   81B5             >            MusicRegsUpdate
+244   81B5 01 FD FF    >            ld bc, #fffd
+244   81B8 ED 79       >            out (c), a
+244   81BA 08          >            ex af, af'
+244   81BB 1A          >            ld a, (de)
+244   81BC BE          >            cp (hl)
+244   81BD 28 05       >            jr z, .SkipSameValue
+244   81BF 06 BF       >            ld b, #bf
+244   81C1 ED 79       >            out (c), a
+244   81C3 77          >            ld (hl), a
+244   81C4             >.SkipSameValue
+244   81C4 08          >            ex af, af'
+244   81C5 3C          >            inc a
+244   81C6 23          >            inc hl
+244   81C7 EB          >            ex de, hl
+244   81C8 01 40 05    >            ld bc, RegisterFileLength
+244   81CB 09          >            add hl, bc
+244   81CC EB          >            ex de, hl
+244   81CD             >            MusicRegsUpdate
+244   81CD 01 FD FF    >            ld bc, #fffd
+244   81D0 ED 79       >            out (c), a
+244   81D2 08          >            ex af, af'
+244   81D3 1A          >            ld a, (de)
+244   81D4 BE          >            cp (hl)
+244   81D5 28 05       >            jr z, .SkipSameValue
+244   81D7 06 BF       >            ld b, #bf
+244   81D9 ED 79       >            out (c), a
+244   81DB 77          >            ld (hl), a
+244   81DC             >.SkipSameValue
+244   81DC 08          >            ex af, af'
+244   81DD 3C          >            inc a
+244   81DE 23          >            inc hl
+244   81DF EB          >            ex de, hl
+244   81E0 01 40 05    >            ld bc, RegisterFileLength
+244   81E3 09          >            add hl, bc
+244   81E4 EB          >            ex de, hl
+244   81E5             >            MusicRegsUpdate
+244   81E5 01 FD FF    >            ld bc, #fffd
+244   81E8 ED 79       >            out (c), a
+244   81EA 08          >            ex af, af'
+244   81EB 1A          >            ld a, (de)
+244   81EC BE          >            cp (hl)
+244   81ED 28 05       >            jr z, .SkipSameValue
+244   81EF 06 BF       >            ld b, #bf
+244   81F1 ED 79       >            out (c), a
+244   81F3 77          >            ld (hl), a
+244   81F4             >.SkipSameValue
+244   81F4 08          >            ex af, af'
+244   81F5 3C          >            inc a
+244   81F6 23          >            inc hl
+244   81F7 EB          >            ex de, hl
+244   81F8 01 40 05    >            ld bc, RegisterFileLength
+244   81FB 09          >            add hl, bc
+244   81FC EB          >            ex de, hl
+245   81FD                      EDUP
+246   81FD                  endif // NO_MUSIC
+247   81FD
+248   81FD              SnowUpdate:
+249   81FD                  ; ----------------------------
+250   81FD                  ; snow update + draw
+251   81FD
+252   81FD                  ; calculate the buffer number to work with
+253   81FD                  ; each buffer is a full 6144 byte screen and takes a whole Next page (could have been done smarter if more memory is needed)
+254   81FD
+255   81FD              CurrentBuffer equ $+1
+256   81FD 3E 50            ld a, NUM_NEXT_PAGES_USED
+257   81FF 3D               dec a
+258   8200 20 02            jr nz, CurrentBufferReady
+259   8202 3E 50            ld a, NUM_NEXT_PAGES_USED
+260   8204              CurrentBufferReady:
+261   8204 32 FE 81         ld (CurrentBuffer), a
+262   8207
+263   8207 C6 0F            add FIRST_NEXT_PAGE_USED - 1
+264   8209                  SetPageInA
+264   8209 ED 92 57    >        nextreg MMU7_E000_NR_57, a
+265   820C
+266   820C                  ; blit the current buffer
+267   820C              BufferDirChangeOp:
+268   820C                  ; the below JR is turned into NOP for forward blits. But just the NOP opcode only, not the offset!  You need to examine .lst file and make sure that the offset becomes a benign instruction,
+269   820C                  ; which it should, given the offset range. E.g. atm it is $5f, which is LD E, A
+270   820C 18 5A            jr BlitForwards
+271   820E
+272   820E              BlitBackwards:
+273   820E 06 C0            ld b, 192
+274   8210              BlitBackwardLoop:
+275   8210 50                   ld d, b
+276   8211 15                   dec d
+277   8212 1E 00                ld e, 0
+278   8214 ED 94                pixelad
+279   8216 CB FC                set 7, h
+280   8218 CB EC                set 5, h
+281   821A
+282   821A E5                   push hl
+283   821B 3E C0                ld a, 192
+284   821D 90                   sub b
+285   821E 57                   ld d, a
+286   821F ED 94                pixelad
+287   8221 EB                   ex de, hl
+288   8222 E1                   pop hl
+289   8223
+290   8223 4A                   ld c, d
+291   8224                      DUP 32
+292   8224 ED A0       >            ldi
+292   8226 ED A0       >            ldi
+292   8228 ED A0       >            ldi
+292   822A ED A0       >            ldi
+292   822C ED A0       >            ldi
+292   822E ED A0       >            ldi
+292   8230 ED A0       >            ldi
+292   8232 ED A0       >            ldi
+292   8234 ED A0       >            ldi
+292   8236 ED A0       >            ldi
+292   8238 ED A0       >            ldi
+292   823A ED A0       >            ldi
+292   823C ED A0       >            ldi
+292   823E ED A0       >            ldi
+292   8240 ED A0       >            ldi
+292   8242 ED A0       >            ldi
+292   8244 ED A0       >            ldi
+292   8246 ED A0       >            ldi
+292   8248 ED A0       >            ldi
+292   824A ED A0       >            ldi
+292   824C ED A0       >            ldi
+292   824E ED A0       >            ldi
+292   8250 ED A0       >            ldi
+292   8252 ED A0       >            ldi
+292   8254 ED A0       >            ldi
+292   8256 ED A0       >            ldi
+292   8258 ED A0       >            ldi
+292   825A ED A0       >            ldi
+292   825C ED A0       >            ldi
+292   825E ED A0       >            ldi
+292   8260 ED A0       >            ldi
+292   8262 ED A0       >            ldi
+293   8264                      EDUP
+294   8264
+295   8264 10 AA            djnz BlitBackwardLoop
+296   8266 18 0B            jr SnowFlakeUpdate
+297   8268
+298   8268              BlitForwards:
+299   8268 21 00 E0         ld hl, $E000
+300   826B 11 00 40         ld de, $4000
+301   826E 01 00 18         ld bc, $1800
+302   8271 ED B0            ldir		; fast enough at 28Mhz to happen while the border is being drawn, even at 60Hz
+303   8273
+304   8273              SnowFlakeUpdate:
+305   8273 CD FE 82         call rnd
+306   8276 4F               ld c, a
+307   8277
+308   8277                  ; update the snow
+309   8277 DD 21 00 C3      ld ix, SnowflakesBuffer
+310   827B 06 03            ld b, NUM_SNOWFLAKES_HI
+311   827D              SnowflakeUpdateLoopHi:
+312   827D C5                   push bc
+313   827E 06 AC                ld b, NUM_SNOWFLAKES_LO
+314   8280              SnowflakeUpdateLoopLo:
+315   8280                          ; Ypos: +0, +1
+316   8280                          ; Yspeed: +2, +3
+317   8280                          ; Xpos: +4, +5
+318   8280 79                       ld a, c
+319   8281 DD A6 02                 and (ix + Snowflake.YSpeed)
+320   8284 DD 86 04                 add (ix + Snowflake.XPos)
+321   8287 DD 77 04                 ld (ix + Snowflake.XPos), a
+322   828A DD 7E 05                 ld a, (ix + Snowflake.XPos + 1)
+323   828D CB 79                    bit 7, c
+324   828F 20 04                    jr nz, 3F ; TurnSnowflakeLeft
+325   8291 CE 00                    adc 0
+326   8293 18 02                    jr 4F ; ContinueSnowFlakeUpdate
+327   8295              3 ; TurnSnowflakeLeft
+328   8295 DE 00                    sbc 0
+329   8297              4 ; ContinueSnowFlakeUpdate
+330   8297 DD 77 05                 ld (ix + Snowflake.XPos + 1), a
+331   829A
+332   829A DD 7E 00                 ld a, (ix + Snowflake.YPos)
+333   829D DD 86 02                 add (ix + Snowflake.YSpeed)
+334   82A0 DD 77 00                 ld (ix + Snowflake.YPos), a
+335   82A3 DD 7E 01                 ld a, (ix + Snowflake.YPos + 1)
+336   82A6 DD 8E 03                 adc (ix + Snowflake.YSpeed + 1)
+337   82A9 DD 77 01                 ld (ix + Snowflake.YPos + 1), a
+338   82AC
+339   82AC D6 3C                    sub 60      ; we leave first 60 pixels above the screen (more than in 128K version because there is 40x more snowflakes)
+340   82AE 38 3A                    jr c, 1F    ; NextSnowflake
+341   82B0
+342   82B0                          ; check if we need to reset this snowflake
+343   82B0 FE C0                    cp 192
+344   82B2 30 10                    jr nc, 2F   ; ResetSnowflake
+345   82B4
+346   82B4                          ; print it!
+347   82B4 57                       ld d, a
+348   82B5 DD 5E 05                 ld e, (ix + Snowflake.XPos + 1)
+349   82B8 ED 94                    pixelad
+350   82BA                          ; convert to $E000 range
+351   82BA CB FC                    set 7, h
+352   82BC CB EC                    set 5, h
+353   82BE                          ;ld a, h
+354   82BE                          ;add $a0
+355   82BE                          ;ld h, a
+356   82BE ED 95                    setae
+357   82C0 B6                       or (hl)
+358   82C1 77                       ld (hl), a
+359   82C2
+360   82C2 18 26                    jr 1F       ; NextSnowflake
+361   82C4
+362   82C4              2 ; ResetSnowflake
+363   82C4                          ResetSnowflake
+363   82C4 AF          >        xor a
+363   82C5 DD 77 04    >        ld (ix + Snowflake.XPos), a
+363   82C8             >
+363   82C8 CD FE 82    >        call rnd
+363   82CB DD 77 00    >        ld (ix + Snowflake.YPos), a
+363   82CE CD FE 82    >        call rnd
+363   82D1 E6 3F       >        and $3f
+363   82D3 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+363   82D6             >
+363   82D6 CD FE 82    >        call rnd
+363   82D9 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+363   82DC             >
+363   82DC CD FE 82    >        call rnd
+363   82DF 6F          >        ld l, a
+363   82E0 E6 01       >        and $1
+363   82E2 67          >        ld h, a
+363   82E3 29          >        add hl, hl
+363   82E4 DD 75 02    >        ld (ix + Snowflake.YSpeed), l
+363   82E7 DD 74 03    >        ld (ix + Snowflake.YSpeed + 1), h
+364   82EA              1 ; NextSnowflake
+365   82EA                          AdvanceToNextSnowflake
+365   82EA             >        if (1)  ; compresses better
+365   82EA DD 23       >            inc ix
+365   82EC DD 23       >            inc ix
+365   82EE DD 23       >            inc ix
+365   82F0 DD 23       >            inc ix
+365   82F2 DD 23       >            inc ix
+365   82F4 DD 23       >            inc ix
+365   82F6             >        else
+365   82F6 ~           >            ld de, 6
+365   82F6 ~           >            add ix, de
+365   82F6             >        endif
+366   82F6 10 88                djnz SnowflakeUpdateLoopLo
+367   82F8 C1                   pop bc
+368   82F9 10 82            djnz SnowflakeUpdateLoopHi
+369   82FB
+370   82FB                  ; ---------------
+371   82FB                  ; end of interrupt
+372   82FB                  if (PROFILE_FRAME)
+373   82FB ~                    xor a
+374   82FB ~                    out (#fe), a
+375   82FB                  endif
+376   82FB
+377   82FB FB               ei
+378   82FC ED 4D            reti
+379   82FE
+380   82FE              rnd:
+381   82FE              ;   exx
+382   82FE 21 19 83             ld  hl, MusicRegs - 1 ; 0xA280   ; yw -> zt
+383   8301 11 5A 88             ld  de, MusicRegs + RegisterFileLength ;0xC0DE   ; xz -> yw
+384   8304 22 02 83             ld  (rnd+4),hl  ; x = y, z = w
+385   8307 7D                   ld  a,l         ; w = w ^ ( w << 3 )
+386   8308 87                   add a,a
+387   8309 87                   add a,a
+388   830A 87                   add a,a
+389   830B AD                   xor l
+390   830C 6F                   ld  l,a
+391   830D 7A                   ld  a,d         ; t = x ^ (x << 1)
+392   830E 87                   add a,a
+393   830F AA                   xor d
+394   8310 67                   ld  h,a
+395   8311 1F                   rra             ; t = t ^ (t >> 1) ^ w
+396   8312 AC                   xor h
+397   8313 AD                   xor l
+398   8314 63                   ld  h,e         ; y = z
+399   8315 6F                   ld  l,a         ; w = t
+400   8316 22 FF 82             ld  (rnd+1),hl
+401   8319              ;   exx
+402   8319 C9                   ret
+403   831A
+404   831A              ; ---------------------------------------------------
+405   831A              ; Resources
+406   831A
+407   831A              MusicRegs:
+408   831A                  incbin "../res/music.bin"
+409   C21A              MusicRegsSize EQU $-MusicRegs
+410   C21A              RegisterFileLength EQU MusicRegsSize / NumRegistersSaved
+411   C21A                  ASSERT RegisterFileLength*NumRegistersSaved = MusicRegsSize
+412   C21A
+413   C21A              InterruptCtr:
+414   C21A 06               db 6
+415   C21B
+416   C21B 00 00 00...      .align 32
+417   C220              InterruptVectors:           ; sorted from highest pri to low (by hardware convention)
+418   C220 AF 80            dw DefaultInterruptHandler  ; 0 line interrupt
+419   C222 AF 80            dw DefaultInterruptHandler  ; 1 UART0 Rx
+420   C224 AF 80            dw DefaultInterruptHandler  ; 2 UART1 Rx
+421   C226 AF 80            dw DefaultInterruptHandler  ; 3 CTC channel 0
+422   C228 AF 80            dw DefaultInterruptHandler  ; 4 CTC channel 1
+423   C22A AF 80            dw DefaultInterruptHandler  ; 5 CTC channel 2
+424   C22C AF 80            dw DefaultInterruptHandler  ; 6 CTC channel 3
+425   C22E AF 80            dw DefaultInterruptHandler  ; 7 CTC channel 4
+426   C230 AF 80            dw DefaultInterruptHandler  ; 8 CTC channel 5
+427   C232 AF 80            dw DefaultInterruptHandler  ; 9 CTC channel 6
+428   C234 AF 80            dw DefaultInterruptHandler  ; A CTC channel 7
+429   C236 B2 80            dw VBlankInterruptHandler   ; B ULA
+430   C238 AF 80            dw DefaultInterruptHandler  ; C UART0 Tx
+431   C23A AF 80            dw DefaultInterruptHandler  ; D UART1 Tx
+432   C23C AF 80            dw DefaultInterruptHandler  ; E
+433   C23E AF 80            dw DefaultInterruptHandler  ; F
+434   C240
+435   C240              PrevRegs:
+436   C240 00 00 00...      block 16
+437   C250
+438   C250 00 00 00...      align 256
+439   C300              SnowflakesBuffer:
+440   C300 00 00 00...      block NUM_SNOWFLAKES * Snowflake
+441   D908
+442   D908              SnowflakesBufferSize equ $ - SnowflakesBuffer
+443   D908
+444   D908                  ; we should not allow the main program to overflow since $E000-$ffff is used for the buffers
+445   D908                  ASSERT $ < $E000
+446   D908                  DISPLAY "Last address is ", /A, $
+447   D908
+448   D908                  savebin "snownononext_main.bin", savebin_begin, $-savebin_begin
+449   D908
+450   D908                  ; for quick dev iteration only
+451   D908                  SAVENEX OPEN "snownononext_main.nex", savebin_begin, $7F40
+452   D908                  SAVENEX CORE 3, 0, 0
+453   D908                  SAVENEX CFG 0, 0, 1, 0
+454   D908                  SAVENEX AUTO
+455   D908                  SAVENEX CLOSE
+456   D908
+# file closed: ..\code\main.asm
