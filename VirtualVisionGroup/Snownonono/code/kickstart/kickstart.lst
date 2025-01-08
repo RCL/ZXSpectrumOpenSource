@@ -1,0 +1,92 @@
+# file opened: ..\code\kickstart\kickstart.asm
+ 1    0000                  device ZXSPECTRUM128
+ 2    0000
+ 3    0000              USE_UPKR    EQU 0
+ 4    0000
+ 5    0000                  org #6000
+ 6    6000
+ 7    6000              overall_start:
+ 8    6000
+ 9    6000                  if (USE_UPKR)
+10    6000 ~                ld ix, compressed
+11    6000 ~                ld de, #6800
+12    6000 ~                push de
+13    6000 ~                exx
+14    6000 ~                ; intentional fall-through to upkr.unpack
+15    6000 ~
+16    6000 ~                    ; upkr 'allocates' PROBS array without really allocating
+17    6000 ~            UPKR_PROBS_ORIGIN EQU #5900
+18    6000 ~                include "unpack.asm"
+19    6000 ~
+20    6000 ~            compressed:
+21    6000 ~                incbin "../../output/snownonono_main.bin.upk"
+22    6000 ~
+23    6000                  else
+24    6000
+25    6000 21 4B 60         ld hl, compressed
+26    6003 11 00 68         ld de, #6800
+27    6006 D5               push de
+28    6007
+29    6007              ; ZX0 decoder by Einar Saukas & Urusergi
+30    6007              dzx0_standard:
+31    6007 01 FF FF             ld      bc, $ffff               ; preserve default offset 1
+32    600A C5                   push    bc
+33    600B 03                   inc     bc
+34    600C 3E 80                ld      a, $80
+35    600E              dzx0s_literals:
+36    600E CD 3C 60             call    dzx0s_elias             ; obtain length
+37    6011 ED B0                ldir                            ; copy literals
+38    6013 87                   add     a, a                    ; copy from last offset or new offset?
+39    6014 38 0D                jr      c, dzx0s_new_offset
+40    6016 CD 3C 60             call    dzx0s_elias             ; obtain length
+41    6019              dzx0s_copy:
+42    6019 E3                   ex      (sp), hl                ; preserve source, restore offset
+43    601A E5                   push    hl                      ; preserve offset
+44    601B 19                   add     hl, de                  ; calculate destination - offset
+45    601C ED B0                ldir                            ; copy from offset
+46    601E E1                   pop     hl                      ; restore offset
+47    601F E3                   ex      (sp), hl                ; preserve offset, restore source
+48    6020 87                   add     a, a                    ; copy from literals or new offset?
+49    6021 30 EB                jr      nc, dzx0s_literals
+50    6023              dzx0s_new_offset:
+51    6023 C1                   pop     bc                      ; discard last offset
+52    6024 0E FE                ld      c, $fe                  ; prepare negative offset
+53    6026 CD 3D 60             call    dzx0s_elias_loop        ; obtain offset MSB
+54    6029 0C                   inc     c
+55    602A C8                   ret     z                       ; check end marker
+56    602B 41                   ld      b, c
+57    602C 4E                   ld      c, (hl)                 ; obtain offset LSB
+58    602D 23                   inc     hl
+59    602E CB 18                rr      b                       ; last offset bit becomes first length bit
+60    6030 CB 19                rr      c
+61    6032 C5                   push    bc                      ; preserve new offset
+62    6033 01 01 00             ld      bc, 1                   ; obtain length
+63    6036 D4 44 60             call    nc, dzx0s_elias_backtrack
+64    6039 03                   inc     bc
+65    603A 18 DD                jr      dzx0s_copy
+66    603C              dzx0s_elias:
+67    603C 0C                   inc     c                       ; interlaced Elias gamma coding
+68    603D              dzx0s_elias_loop:
+69    603D 87                   add     a, a
+70    603E 20 03                jr      nz, dzx0s_elias_skip
+71    6040 7E                   ld      a, (hl)                 ; load another group of 8 bits
+72    6041 23                   inc     hl
+73    6042 17                   rla
+74    6043              dzx0s_elias_skip:
+75    6043 D8                   ret     c
+76    6044              dzx0s_elias_backtrack:
+77    6044 87                   add     a, a
+78    6045 CB 11                rl      c
+79    6047 CB 10                rl      b
+80    6049 18 F2                jr      dzx0s_elias_loop
+81    604B
+82    604B              compressed:
+83    604B                  incbin "../../output/snownonono_main.bin.zx0"
+84    63FF                  endif
+85    63FF
+86    63FF              overall_size = $ - overall_start
+87    63FF
+88    63FF                  SAVETAP "snownonono_codeonly_24576.tap", CODE, "Snownonono",overall_start,overall_size
+89    63FF                  SAVEBIN "snownonono.bin",overall_start,overall_size
+90    63FF                  SAVESNA "snownonono.sna", #6000
+# file closed: ..\code\kickstart\kickstart.asm

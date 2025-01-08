@@ -1,0 +1,3111 @@
+# file opened: ..\code\main.asm
+  1   0000                  device ZXSPECTRUM128
+  2   0000
+  3   0000              NUM_BUFFER_PAGES        EQU 6
+  4   0000              NUM_SNOWFLAKES          EQU 21
+  5   0000
+  6   0000              NO_MUSIC                EQU 0
+  7   0000              PROFILE_FRAME           EQU 0
+  8   0000
+  9   0000                  STRUCT  Snowflake
+ 10   0000 ~            YPos            dw 0
+ 11   0000 ~            YSpeed          dw 0
+ 12   0000 ~            XPos            dw 0
+ 13   0000                  ENDS
+ 14   0000
+ 15   0000                  ; pages in a 128K page that is in the A register
+ 16   0000                  MACRO SetPageInA
+ 17   0000 ~                    ld ($5b5c), a   ; BANKM
+ 18   0000 ~                    ld bc, #7ffd
+ 19   0000 ~                    out (c), a
+ 20   0000                  ENDM
+ 21   0000
+ 22   0000                  ; Advances a reg pair to the next scanline
+ 23   0000                  ; from https://espamatica.com/zx-spectrum-screen/#next-scanline
+ 24   0000                  MACRO NextScanline  RegH, RegL
+ 25   0000 ~                    ld a, RegH
+ 26   0000 ~                    and $07
+ 27   0000 ~                    cp $07
+ 28   0000 ~                    jr z, .ChangeOfLine
+ 29   0000 ~                    inc RegH
+ 30   0000 ~                    jr .Done
+ 31   0000 ~            .ChangeOfLine
+ 32   0000 ~                    ld a, RegL
+ 33   0000 ~                    add $20
+ 34   0000 ~                    ld RegL, a
+ 35   0000 ~                    ld a, RegH
+ 36   0000 ~                    jr nc, .NoScreenThirdChange
+ 37   0000 ~                    add $08
+ 38   0000 ~            .NoScreenThirdChange
+ 39   0000 ~                    and $f8
+ 40   0000 ~                    ld RegH, a
+ 41   0000 ~            .Done
+ 42   0000                  ENDM
+ 43   0000
+ 44   0000                  ; Resets a snowflake. IX - pointer to the current snowflake structure
+ 45   0000                  ; Made a macro so exact same code can be used twice and compress better
+ 46   0000                  ; Keeps HL and B intact
+ 47   0000                  MACRO ResetSnowflake
+ 48   0000 ~                    xor a
+ 49   0000 ~                    ld (ix + Snowflake.XPos), a
+ 50   0000 ~                    ld (ix + Snowflake.YSpeed + 1), a
+ 51   0000 ~
+ 52   0000 ~                    call rnd
+ 53   0000 ~                    ld (ix + Snowflake.YPos), a
+ 54   0000 ~                    call rnd
+ 55   0000 ~                    and $0f
+ 56   0000 ~                    ld (ix + Snowflake.YPos + 1), a
+ 57   0000 ~
+ 58   0000 ~                    call rnd
+ 59   0000 ~                    ld (ix + Snowflake.XPos + 1), a
+ 60   0000 ~
+ 61   0000 ~                    call rnd
+ 62   0000 ~                    or $20
+ 63   0000 ~                    ld (ix + Snowflake.YSpeed), a
+ 64   0000                  ENDM
+ 65   0000
+ 66   0000                  ; a separate macro just to see what compresses better, a row of inc or add
+ 67   0000                  MACRO AdvanceToNextSnowflake
+ 68   0000 ~                    if (1)  ; compresses better
+ 69   0000 ~                        inc ix
+ 70   0000 ~                        inc ix
+ 71   0000 ~                        inc ix
+ 72   0000 ~                        inc ix
+ 73   0000 ~                        inc ix
+ 74   0000 ~                        inc ix
+ 75   0000 ~                    else
+ 76   0000 ~                        ld de, 6
+ 77   0000 ~                        add ix, de
+ 78   0000 ~                    endif
+ 79   0000                  ENDM
+ 80   0000
+ 81   0000                  org #6800
+ 82   6800
+ 83   6800              savebin_begin:
+ 84   6800                  if (!NO_MUSIC)
+ 85   6800 C3 03 A7             jp CodeStart
+ 86   6803
+ 87   6803              MusicRegs:
+ 88   6803                      incbin "../res/music.bin"
+ 89   A703              MusicRegsSize EQU $-MusicRegs
+ 90   A703              NumRegistersSaved EQU 12
+ 91   A703              RegisterFileLength EQU MusicRegsSize / NumRegistersSaved
+ 92   A703                  ASSERT RegisterFileLength*NumRegistersSaved = MusicRegsSize
+ 93   A703
+ 94   A703              CodeStart:
+ 95   A703                  endif // NO_MUSIC
+ 96   A703
+ 97   A703                  ; clear all the buffers (and also tests for 48K)
+ 98   A703                  MACRO ClearPage
+ 99   A703 ~                    ld a, (hl)
+100   A703 ~                    inc hl
+101   A703 ~                    exx
+102   A703 ~                    ld hl, #c000
+103   A703 ~                    SetPageInA
+104   A703 ~
+105   A703 ~                    ; fail gracefully on 48k
+106   A703 ~                    dec (hl)
+107   A703 ~                    ret z
+108   A703 ~
+109   A703 ~                    ld bc, #4000    ; it will write to ROM, but this will compress better
+110   A703 ~                    ld d, h
+111   A703 ~                    ld e, l
+112   A703 ~                    inc e
+113   A703 ~                    ld (hl), l
+114   A703 ~                    ldir
+115   A703 ~                    exx
+116   A703                  ENDM
+117   A703
+118   A703                  ; same macro without the check. Needs to be IDENTICAL (sans check) or you'll ruin the compression
+119   A703                  MACRO ClearPageNoCheck
+120   A703 ~                    ld a, (hl)
+121   A703 ~                    inc hl
+122   A703 ~                    exx
+123   A703 ~                    ld hl, #c000
+124   A703 ~                    SetPageInA
+125   A703 ~
+126   A703 ~                    ld bc, #4000    ; it will write to ROM, but this will compress better
+127   A703 ~                    ld d, h
+128   A703 ~                    ld e, l
+129   A703 ~                    inc e
+130   A703 ~                    ld (hl), l
+131   A703 ~                    ldir
+132   A703 ~                    exx
+133   A703                  ENDM
+134   A703
+135   A703 FD 36 00 04      ld (iy+0), 4  ; set "Out of Memory" in advance
+136   A707
+137   A707 21 00 B9         ld hl, BufferPages
+138   A70A                  DUP NUM_BUFFER_PAGES - 1
+139   A70A             >        ClearPage
+139   A70A 7E          >        ld a, (hl)
+139   A70B 23          >        inc hl
+139   A70C D9          >        exx
+139   A70D 21 00 C0    >        ld hl, #c000
+139   A710             >        SetPageInA
+139   A710 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+139   A713 01 FD 7F    >        ld bc, #7ffd
+139   A716 ED 79       >        out (c), a
+139   A718             >
+139   A718             >        ; fail gracefully on 48k
+139   A718 35          >        dec (hl)
+139   A719 C8          >        ret z
+139   A71A             >
+139   A71A 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+139   A71D 54          >        ld d, h
+139   A71E 5D          >        ld e, l
+139   A71F 1C          >        inc e
+139   A720 75          >        ld (hl), l
+139   A721 ED B0       >        ldir
+139   A723 D9          >        exx
+139   A724             >        ClearPage
+139   A724 7E          >        ld a, (hl)
+139   A725 23          >        inc hl
+139   A726 D9          >        exx
+139   A727 21 00 C0    >        ld hl, #c000
+139   A72A             >        SetPageInA
+139   A72A 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+139   A72D 01 FD 7F    >        ld bc, #7ffd
+139   A730 ED 79       >        out (c), a
+139   A732             >
+139   A732             >        ; fail gracefully on 48k
+139   A732 35          >        dec (hl)
+139   A733 C8          >        ret z
+139   A734             >
+139   A734 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+139   A737 54          >        ld d, h
+139   A738 5D          >        ld e, l
+139   A739 1C          >        inc e
+139   A73A 75          >        ld (hl), l
+139   A73B ED B0       >        ldir
+139   A73D D9          >        exx
+139   A73E             >        ClearPage
+139   A73E 7E          >        ld a, (hl)
+139   A73F 23          >        inc hl
+139   A740 D9          >        exx
+139   A741 21 00 C0    >        ld hl, #c000
+139   A744             >        SetPageInA
+139   A744 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+139   A747 01 FD 7F    >        ld bc, #7ffd
+139   A74A ED 79       >        out (c), a
+139   A74C             >
+139   A74C             >        ; fail gracefully on 48k
+139   A74C 35          >        dec (hl)
+139   A74D C8          >        ret z
+139   A74E             >
+139   A74E 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+139   A751 54          >        ld d, h
+139   A752 5D          >        ld e, l
+139   A753 1C          >        inc e
+139   A754 75          >        ld (hl), l
+139   A755 ED B0       >        ldir
+139   A757 D9          >        exx
+139   A758             >        ClearPage
+139   A758 7E          >        ld a, (hl)
+139   A759 23          >        inc hl
+139   A75A D9          >        exx
+139   A75B 21 00 C0    >        ld hl, #c000
+139   A75E             >        SetPageInA
+139   A75E 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+139   A761 01 FD 7F    >        ld bc, #7ffd
+139   A764 ED 79       >        out (c), a
+139   A766             >
+139   A766             >        ; fail gracefully on 48k
+139   A766 35          >        dec (hl)
+139   A767 C8          >        ret z
+139   A768             >
+139   A768 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+139   A76B 54          >        ld d, h
+139   A76C 5D          >        ld e, l
+139   A76D 1C          >        inc e
+139   A76E 75          >        ld (hl), l
+139   A76F ED B0       >        ldir
+139   A771 D9          >        exx
+139   A772             >        ClearPage
+139   A772 7E          >        ld a, (hl)
+139   A773 23          >        inc hl
+139   A774 D9          >        exx
+139   A775 21 00 C0    >        ld hl, #c000
+139   A778             >        SetPageInA
+139   A778 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+139   A77B 01 FD 7F    >        ld bc, #7ffd
+139   A77E ED 79       >        out (c), a
+139   A780             >
+139   A780             >        ; fail gracefully on 48k
+139   A780 35          >        dec (hl)
+139   A781 C8          >        ret z
+139   A782             >
+139   A782 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+139   A785 54          >        ld d, h
+139   A786 5D          >        ld e, l
+139   A787 1C          >        inc e
+139   A788 75          >        ld (hl), l
+139   A789 ED B0       >        ldir
+139   A78B D9          >        exx
+140   A78C                  EDUP
+141   A78C                  ClearPageNoCheck
+141   A78C 7E          >        ld a, (hl)
+141   A78D 23          >        inc hl
+141   A78E D9          >        exx
+141   A78F 21 00 C0    >        ld hl, #c000
+141   A792             >        SetPageInA
+141   A792 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+141   A795 01 FD 7F    >        ld bc, #7ffd
+141   A798 ED 79       >        out (c), a
+141   A79A             >
+141   A79A 01 00 40    >        ld bc, #4000    ; it will write to ROM, but this will compress better
+141   A79D 54          >        ld d, h
+141   A79E 5D          >        ld e, l
+141   A79F 1C          >        inc e
+141   A7A0 75          >        ld (hl), l
+141   A7A1 ED B0       >        ldir
+141   A7A3 D9          >        exx
+142   A7A4
+143   A7A4                  ; we're 128k here
+144   A7A4
+145   A7A4 AF               xor a
+146   A7A5 D3 FE            out (#fe), a
+147   A7A7 01 00 18         ld bc, 6144
+148   A7AA 21 00 40         ld hl, #4000
+149   A7AD 54               ld d, h
+150   A7AE 5D               ld e, l
+151   A7AF 1C               inc e
+152   A7B0 75               ld (hl), l
+153   A7B1 ED B0            ldir
+154   A7B3 36 47            ld (hl), #47
+155   A7B5 01 FF 02         ld bc, 767
+156   A7B8 ED B0            ldir
+157   A7BA
+158   A7BA DD 21 00 BA      ld ix, SnowflakesBuffer
+159   A7BE                  DUP NUM_SNOWFLAKES
+160   A7BE             >        ResetSnowflake
+160   A7BE AF          >        xor a
+160   A7BF DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A7C2 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A7C5             >
+160   A7C5 CD DA B7    >        call rnd
+160   A7C8 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A7CB CD DA B7    >        call rnd
+160   A7CE E6 0F       >        and $0f
+160   A7D0 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A7D3             >
+160   A7D3 CD DA B7    >        call rnd
+160   A7D6 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A7D9             >
+160   A7D9 CD DA B7    >        call rnd
+160   A7DC F6 20       >        or $20
+160   A7DE DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A7E1             >        AdvanceToNextSnowflake
+161   A7E1             >        if (1)  ; compresses better
+161   A7E1 DD 23       >            inc ix
+161   A7E3 DD 23       >            inc ix
+161   A7E5 DD 23       >            inc ix
+161   A7E7 DD 23       >            inc ix
+161   A7E9 DD 23       >            inc ix
+161   A7EB DD 23       >            inc ix
+161   A7ED             >        else
+161   A7ED ~           >            ld de, 6
+161   A7ED ~           >            add ix, de
+161   A7ED             >        endif
+160   A7ED             >        ResetSnowflake
+160   A7ED AF          >        xor a
+160   A7EE DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A7F1 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A7F4             >
+160   A7F4 CD DA B7    >        call rnd
+160   A7F7 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A7FA CD DA B7    >        call rnd
+160   A7FD E6 0F       >        and $0f
+160   A7FF DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A802             >
+160   A802 CD DA B7    >        call rnd
+160   A805 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A808             >
+160   A808 CD DA B7    >        call rnd
+160   A80B F6 20       >        or $20
+160   A80D DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A810             >        AdvanceToNextSnowflake
+161   A810             >        if (1)  ; compresses better
+161   A810 DD 23       >            inc ix
+161   A812 DD 23       >            inc ix
+161   A814 DD 23       >            inc ix
+161   A816 DD 23       >            inc ix
+161   A818 DD 23       >            inc ix
+161   A81A DD 23       >            inc ix
+161   A81C             >        else
+161   A81C ~           >            ld de, 6
+161   A81C ~           >            add ix, de
+161   A81C             >        endif
+160   A81C             >        ResetSnowflake
+160   A81C AF          >        xor a
+160   A81D DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A820 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A823             >
+160   A823 CD DA B7    >        call rnd
+160   A826 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A829 CD DA B7    >        call rnd
+160   A82C E6 0F       >        and $0f
+160   A82E DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A831             >
+160   A831 CD DA B7    >        call rnd
+160   A834 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A837             >
+160   A837 CD DA B7    >        call rnd
+160   A83A F6 20       >        or $20
+160   A83C DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A83F             >        AdvanceToNextSnowflake
+161   A83F             >        if (1)  ; compresses better
+161   A83F DD 23       >            inc ix
+161   A841 DD 23       >            inc ix
+161   A843 DD 23       >            inc ix
+161   A845 DD 23       >            inc ix
+161   A847 DD 23       >            inc ix
+161   A849 DD 23       >            inc ix
+161   A84B             >        else
+161   A84B ~           >            ld de, 6
+161   A84B ~           >            add ix, de
+161   A84B             >        endif
+160   A84B             >        ResetSnowflake
+160   A84B AF          >        xor a
+160   A84C DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A84F DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A852             >
+160   A852 CD DA B7    >        call rnd
+160   A855 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A858 CD DA B7    >        call rnd
+160   A85B E6 0F       >        and $0f
+160   A85D DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A860             >
+160   A860 CD DA B7    >        call rnd
+160   A863 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A866             >
+160   A866 CD DA B7    >        call rnd
+160   A869 F6 20       >        or $20
+160   A86B DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A86E             >        AdvanceToNextSnowflake
+161   A86E             >        if (1)  ; compresses better
+161   A86E DD 23       >            inc ix
+161   A870 DD 23       >            inc ix
+161   A872 DD 23       >            inc ix
+161   A874 DD 23       >            inc ix
+161   A876 DD 23       >            inc ix
+161   A878 DD 23       >            inc ix
+161   A87A             >        else
+161   A87A ~           >            ld de, 6
+161   A87A ~           >            add ix, de
+161   A87A             >        endif
+160   A87A             >        ResetSnowflake
+160   A87A AF          >        xor a
+160   A87B DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A87E DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A881             >
+160   A881 CD DA B7    >        call rnd
+160   A884 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A887 CD DA B7    >        call rnd
+160   A88A E6 0F       >        and $0f
+160   A88C DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A88F             >
+160   A88F CD DA B7    >        call rnd
+160   A892 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A895             >
+160   A895 CD DA B7    >        call rnd
+160   A898 F6 20       >        or $20
+160   A89A DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A89D             >        AdvanceToNextSnowflake
+161   A89D             >        if (1)  ; compresses better
+161   A89D DD 23       >            inc ix
+161   A89F DD 23       >            inc ix
+161   A8A1 DD 23       >            inc ix
+161   A8A3 DD 23       >            inc ix
+161   A8A5 DD 23       >            inc ix
+161   A8A7 DD 23       >            inc ix
+161   A8A9             >        else
+161   A8A9 ~           >            ld de, 6
+161   A8A9 ~           >            add ix, de
+161   A8A9             >        endif
+160   A8A9             >        ResetSnowflake
+160   A8A9 AF          >        xor a
+160   A8AA DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A8AD DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A8B0             >
+160   A8B0 CD DA B7    >        call rnd
+160   A8B3 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A8B6 CD DA B7    >        call rnd
+160   A8B9 E6 0F       >        and $0f
+160   A8BB DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A8BE             >
+160   A8BE CD DA B7    >        call rnd
+160   A8C1 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A8C4             >
+160   A8C4 CD DA B7    >        call rnd
+160   A8C7 F6 20       >        or $20
+160   A8C9 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A8CC             >        AdvanceToNextSnowflake
+161   A8CC             >        if (1)  ; compresses better
+161   A8CC DD 23       >            inc ix
+161   A8CE DD 23       >            inc ix
+161   A8D0 DD 23       >            inc ix
+161   A8D2 DD 23       >            inc ix
+161   A8D4 DD 23       >            inc ix
+161   A8D6 DD 23       >            inc ix
+161   A8D8             >        else
+161   A8D8 ~           >            ld de, 6
+161   A8D8 ~           >            add ix, de
+161   A8D8             >        endif
+160   A8D8             >        ResetSnowflake
+160   A8D8 AF          >        xor a
+160   A8D9 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A8DC DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A8DF             >
+160   A8DF CD DA B7    >        call rnd
+160   A8E2 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A8E5 CD DA B7    >        call rnd
+160   A8E8 E6 0F       >        and $0f
+160   A8EA DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A8ED             >
+160   A8ED CD DA B7    >        call rnd
+160   A8F0 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A8F3             >
+160   A8F3 CD DA B7    >        call rnd
+160   A8F6 F6 20       >        or $20
+160   A8F8 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A8FB             >        AdvanceToNextSnowflake
+161   A8FB             >        if (1)  ; compresses better
+161   A8FB DD 23       >            inc ix
+161   A8FD DD 23       >            inc ix
+161   A8FF DD 23       >            inc ix
+161   A901 DD 23       >            inc ix
+161   A903 DD 23       >            inc ix
+161   A905 DD 23       >            inc ix
+161   A907             >        else
+161   A907 ~           >            ld de, 6
+161   A907 ~           >            add ix, de
+161   A907             >        endif
+160   A907             >        ResetSnowflake
+160   A907 AF          >        xor a
+160   A908 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A90B DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A90E             >
+160   A90E CD DA B7    >        call rnd
+160   A911 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A914 CD DA B7    >        call rnd
+160   A917 E6 0F       >        and $0f
+160   A919 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A91C             >
+160   A91C CD DA B7    >        call rnd
+160   A91F DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A922             >
+160   A922 CD DA B7    >        call rnd
+160   A925 F6 20       >        or $20
+160   A927 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A92A             >        AdvanceToNextSnowflake
+161   A92A             >        if (1)  ; compresses better
+161   A92A DD 23       >            inc ix
+161   A92C DD 23       >            inc ix
+161   A92E DD 23       >            inc ix
+161   A930 DD 23       >            inc ix
+161   A932 DD 23       >            inc ix
+161   A934 DD 23       >            inc ix
+161   A936             >        else
+161   A936 ~           >            ld de, 6
+161   A936 ~           >            add ix, de
+161   A936             >        endif
+160   A936             >        ResetSnowflake
+160   A936 AF          >        xor a
+160   A937 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A93A DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A93D             >
+160   A93D CD DA B7    >        call rnd
+160   A940 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A943 CD DA B7    >        call rnd
+160   A946 E6 0F       >        and $0f
+160   A948 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A94B             >
+160   A94B CD DA B7    >        call rnd
+160   A94E DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A951             >
+160   A951 CD DA B7    >        call rnd
+160   A954 F6 20       >        or $20
+160   A956 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A959             >        AdvanceToNextSnowflake
+161   A959             >        if (1)  ; compresses better
+161   A959 DD 23       >            inc ix
+161   A95B DD 23       >            inc ix
+161   A95D DD 23       >            inc ix
+161   A95F DD 23       >            inc ix
+161   A961 DD 23       >            inc ix
+161   A963 DD 23       >            inc ix
+161   A965             >        else
+161   A965 ~           >            ld de, 6
+161   A965 ~           >            add ix, de
+161   A965             >        endif
+160   A965             >        ResetSnowflake
+160   A965 AF          >        xor a
+160   A966 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A969 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A96C             >
+160   A96C CD DA B7    >        call rnd
+160   A96F DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A972 CD DA B7    >        call rnd
+160   A975 E6 0F       >        and $0f
+160   A977 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A97A             >
+160   A97A CD DA B7    >        call rnd
+160   A97D DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A980             >
+160   A980 CD DA B7    >        call rnd
+160   A983 F6 20       >        or $20
+160   A985 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A988             >        AdvanceToNextSnowflake
+161   A988             >        if (1)  ; compresses better
+161   A988 DD 23       >            inc ix
+161   A98A DD 23       >            inc ix
+161   A98C DD 23       >            inc ix
+161   A98E DD 23       >            inc ix
+161   A990 DD 23       >            inc ix
+161   A992 DD 23       >            inc ix
+161   A994             >        else
+161   A994 ~           >            ld de, 6
+161   A994 ~           >            add ix, de
+161   A994             >        endif
+160   A994             >        ResetSnowflake
+160   A994 AF          >        xor a
+160   A995 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A998 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A99B             >
+160   A99B CD DA B7    >        call rnd
+160   A99E DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A9A1 CD DA B7    >        call rnd
+160   A9A4 E6 0F       >        and $0f
+160   A9A6 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A9A9             >
+160   A9A9 CD DA B7    >        call rnd
+160   A9AC DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A9AF             >
+160   A9AF CD DA B7    >        call rnd
+160   A9B2 F6 20       >        or $20
+160   A9B4 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A9B7             >        AdvanceToNextSnowflake
+161   A9B7             >        if (1)  ; compresses better
+161   A9B7 DD 23       >            inc ix
+161   A9B9 DD 23       >            inc ix
+161   A9BB DD 23       >            inc ix
+161   A9BD DD 23       >            inc ix
+161   A9BF DD 23       >            inc ix
+161   A9C1 DD 23       >            inc ix
+161   A9C3             >        else
+161   A9C3 ~           >            ld de, 6
+161   A9C3 ~           >            add ix, de
+161   A9C3             >        endif
+160   A9C3             >        ResetSnowflake
+160   A9C3 AF          >        xor a
+160   A9C4 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A9C7 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A9CA             >
+160   A9CA CD DA B7    >        call rnd
+160   A9CD DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A9D0 CD DA B7    >        call rnd
+160   A9D3 E6 0F       >        and $0f
+160   A9D5 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   A9D8             >
+160   A9D8 CD DA B7    >        call rnd
+160   A9DB DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   A9DE             >
+160   A9DE CD DA B7    >        call rnd
+160   A9E1 F6 20       >        or $20
+160   A9E3 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   A9E6             >        AdvanceToNextSnowflake
+161   A9E6             >        if (1)  ; compresses better
+161   A9E6 DD 23       >            inc ix
+161   A9E8 DD 23       >            inc ix
+161   A9EA DD 23       >            inc ix
+161   A9EC DD 23       >            inc ix
+161   A9EE DD 23       >            inc ix
+161   A9F0 DD 23       >            inc ix
+161   A9F2             >        else
+161   A9F2 ~           >            ld de, 6
+161   A9F2 ~           >            add ix, de
+161   A9F2             >        endif
+160   A9F2             >        ResetSnowflake
+160   A9F2 AF          >        xor a
+160   A9F3 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   A9F6 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   A9F9             >
+160   A9F9 CD DA B7    >        call rnd
+160   A9FC DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   A9FF CD DA B7    >        call rnd
+160   AA02 E6 0F       >        and $0f
+160   AA04 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AA07             >
+160   AA07 CD DA B7    >        call rnd
+160   AA0A DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AA0D             >
+160   AA0D CD DA B7    >        call rnd
+160   AA10 F6 20       >        or $20
+160   AA12 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AA15             >        AdvanceToNextSnowflake
+161   AA15             >        if (1)  ; compresses better
+161   AA15 DD 23       >            inc ix
+161   AA17 DD 23       >            inc ix
+161   AA19 DD 23       >            inc ix
+161   AA1B DD 23       >            inc ix
+161   AA1D DD 23       >            inc ix
+161   AA1F DD 23       >            inc ix
+161   AA21             >        else
+161   AA21 ~           >            ld de, 6
+161   AA21 ~           >            add ix, de
+161   AA21             >        endif
+160   AA21             >        ResetSnowflake
+160   AA21 AF          >        xor a
+160   AA22 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AA25 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AA28             >
+160   AA28 CD DA B7    >        call rnd
+160   AA2B DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AA2E CD DA B7    >        call rnd
+160   AA31 E6 0F       >        and $0f
+160   AA33 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AA36             >
+160   AA36 CD DA B7    >        call rnd
+160   AA39 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AA3C             >
+160   AA3C CD DA B7    >        call rnd
+160   AA3F F6 20       >        or $20
+160   AA41 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AA44             >        AdvanceToNextSnowflake
+161   AA44             >        if (1)  ; compresses better
+161   AA44 DD 23       >            inc ix
+161   AA46 DD 23       >            inc ix
+161   AA48 DD 23       >            inc ix
+161   AA4A DD 23       >            inc ix
+161   AA4C DD 23       >            inc ix
+161   AA4E DD 23       >            inc ix
+161   AA50             >        else
+161   AA50 ~           >            ld de, 6
+161   AA50 ~           >            add ix, de
+161   AA50             >        endif
+160   AA50             >        ResetSnowflake
+160   AA50 AF          >        xor a
+160   AA51 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AA54 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AA57             >
+160   AA57 CD DA B7    >        call rnd
+160   AA5A DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AA5D CD DA B7    >        call rnd
+160   AA60 E6 0F       >        and $0f
+160   AA62 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AA65             >
+160   AA65 CD DA B7    >        call rnd
+160   AA68 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AA6B             >
+160   AA6B CD DA B7    >        call rnd
+160   AA6E F6 20       >        or $20
+160   AA70 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AA73             >        AdvanceToNextSnowflake
+161   AA73             >        if (1)  ; compresses better
+161   AA73 DD 23       >            inc ix
+161   AA75 DD 23       >            inc ix
+161   AA77 DD 23       >            inc ix
+161   AA79 DD 23       >            inc ix
+161   AA7B DD 23       >            inc ix
+161   AA7D DD 23       >            inc ix
+161   AA7F             >        else
+161   AA7F ~           >            ld de, 6
+161   AA7F ~           >            add ix, de
+161   AA7F             >        endif
+160   AA7F             >        ResetSnowflake
+160   AA7F AF          >        xor a
+160   AA80 DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AA83 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AA86             >
+160   AA86 CD DA B7    >        call rnd
+160   AA89 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AA8C CD DA B7    >        call rnd
+160   AA8F E6 0F       >        and $0f
+160   AA91 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AA94             >
+160   AA94 CD DA B7    >        call rnd
+160   AA97 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AA9A             >
+160   AA9A CD DA B7    >        call rnd
+160   AA9D F6 20       >        or $20
+160   AA9F DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AAA2             >        AdvanceToNextSnowflake
+161   AAA2             >        if (1)  ; compresses better
+161   AAA2 DD 23       >            inc ix
+161   AAA4 DD 23       >            inc ix
+161   AAA6 DD 23       >            inc ix
+161   AAA8 DD 23       >            inc ix
+161   AAAA DD 23       >            inc ix
+161   AAAC DD 23       >            inc ix
+161   AAAE             >        else
+161   AAAE ~           >            ld de, 6
+161   AAAE ~           >            add ix, de
+161   AAAE             >        endif
+160   AAAE             >        ResetSnowflake
+160   AAAE AF          >        xor a
+160   AAAF DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AAB2 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AAB5             >
+160   AAB5 CD DA B7    >        call rnd
+160   AAB8 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AABB CD DA B7    >        call rnd
+160   AABE E6 0F       >        and $0f
+160   AAC0 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AAC3             >
+160   AAC3 CD DA B7    >        call rnd
+160   AAC6 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AAC9             >
+160   AAC9 CD DA B7    >        call rnd
+160   AACC F6 20       >        or $20
+160   AACE DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AAD1             >        AdvanceToNextSnowflake
+161   AAD1             >        if (1)  ; compresses better
+161   AAD1 DD 23       >            inc ix
+161   AAD3 DD 23       >            inc ix
+161   AAD5 DD 23       >            inc ix
+161   AAD7 DD 23       >            inc ix
+161   AAD9 DD 23       >            inc ix
+161   AADB DD 23       >            inc ix
+161   AADD             >        else
+161   AADD ~           >            ld de, 6
+161   AADD ~           >            add ix, de
+161   AADD             >        endif
+160   AADD             >        ResetSnowflake
+160   AADD AF          >        xor a
+160   AADE DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AAE1 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AAE4             >
+160   AAE4 CD DA B7    >        call rnd
+160   AAE7 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AAEA CD DA B7    >        call rnd
+160   AAED E6 0F       >        and $0f
+160   AAEF DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AAF2             >
+160   AAF2 CD DA B7    >        call rnd
+160   AAF5 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AAF8             >
+160   AAF8 CD DA B7    >        call rnd
+160   AAFB F6 20       >        or $20
+160   AAFD DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AB00             >        AdvanceToNextSnowflake
+161   AB00             >        if (1)  ; compresses better
+161   AB00 DD 23       >            inc ix
+161   AB02 DD 23       >            inc ix
+161   AB04 DD 23       >            inc ix
+161   AB06 DD 23       >            inc ix
+161   AB08 DD 23       >            inc ix
+161   AB0A DD 23       >            inc ix
+161   AB0C             >        else
+161   AB0C ~           >            ld de, 6
+161   AB0C ~           >            add ix, de
+161   AB0C             >        endif
+160   AB0C             >        ResetSnowflake
+160   AB0C AF          >        xor a
+160   AB0D DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AB10 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AB13             >
+160   AB13 CD DA B7    >        call rnd
+160   AB16 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AB19 CD DA B7    >        call rnd
+160   AB1C E6 0F       >        and $0f
+160   AB1E DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AB21             >
+160   AB21 CD DA B7    >        call rnd
+160   AB24 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AB27             >
+160   AB27 CD DA B7    >        call rnd
+160   AB2A F6 20       >        or $20
+160   AB2C DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AB2F             >        AdvanceToNextSnowflake
+161   AB2F             >        if (1)  ; compresses better
+161   AB2F DD 23       >            inc ix
+161   AB31 DD 23       >            inc ix
+161   AB33 DD 23       >            inc ix
+161   AB35 DD 23       >            inc ix
+161   AB37 DD 23       >            inc ix
+161   AB39 DD 23       >            inc ix
+161   AB3B             >        else
+161   AB3B ~           >            ld de, 6
+161   AB3B ~           >            add ix, de
+161   AB3B             >        endif
+160   AB3B             >        ResetSnowflake
+160   AB3B AF          >        xor a
+160   AB3C DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AB3F DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AB42             >
+160   AB42 CD DA B7    >        call rnd
+160   AB45 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AB48 CD DA B7    >        call rnd
+160   AB4B E6 0F       >        and $0f
+160   AB4D DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AB50             >
+160   AB50 CD DA B7    >        call rnd
+160   AB53 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AB56             >
+160   AB56 CD DA B7    >        call rnd
+160   AB59 F6 20       >        or $20
+160   AB5B DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AB5E             >        AdvanceToNextSnowflake
+161   AB5E             >        if (1)  ; compresses better
+161   AB5E DD 23       >            inc ix
+161   AB60 DD 23       >            inc ix
+161   AB62 DD 23       >            inc ix
+161   AB64 DD 23       >            inc ix
+161   AB66 DD 23       >            inc ix
+161   AB68 DD 23       >            inc ix
+161   AB6A             >        else
+161   AB6A ~           >            ld de, 6
+161   AB6A ~           >            add ix, de
+161   AB6A             >        endif
+160   AB6A             >        ResetSnowflake
+160   AB6A AF          >        xor a
+160   AB6B DD 77 04    >        ld (ix + Snowflake.XPos), a
+160   AB6E DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+160   AB71             >
+160   AB71 CD DA B7    >        call rnd
+160   AB74 DD 77 00    >        ld (ix + Snowflake.YPos), a
+160   AB77 CD DA B7    >        call rnd
+160   AB7A E6 0F       >        and $0f
+160   AB7C DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+160   AB7F             >
+160   AB7F CD DA B7    >        call rnd
+160   AB82 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+160   AB85             >
+160   AB85 CD DA B7    >        call rnd
+160   AB88 F6 20       >        or $20
+160   AB8A DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+161   AB8D             >        AdvanceToNextSnowflake
+161   AB8D             >        if (1)  ; compresses better
+161   AB8D DD 23       >            inc ix
+161   AB8F DD 23       >            inc ix
+161   AB91 DD 23       >            inc ix
+161   AB93 DD 23       >            inc ix
+161   AB95 DD 23       >            inc ix
+161   AB97 DD 23       >            inc ix
+161   AB99             >        else
+161   AB99 ~           >            ld de, 6
+161   AB99 ~           >            add ix, de
+161   AB99             >        endif
+162   AB99                  EDUP
+163   AB99
+164   AB99                  ; we know that in our track the whole value of reg 13 is 0x0E
+165   AB99 3E 0D            ld a, 13
+166   AB9B 01 FD FF         ld bc, #fffd
+167   AB9E ED 79            out (c), a
+168   ABA0 3C               inc a
+169   ABA1 06 BF            ld b, #bf
+170   ABA3 ED 79            out (c), a
+171   ABA5
+172   ABA5                  ; -------------------------------
+173   ABA5                  ; main loop
+174   ABA5              main_loop:
+175   ABA5 FB               ei          ; not really needed, but keeping as a last-ditch reserve
+176   ABA6 76               halt
+177   ABA7
+178   ABA7                  if (PROFILE_FRAME)
+179   ABA7 ~                    ld a, 7
+180   ABA7 ~                    out (#fe), a
+181   ABA7                  endif
+182   ABA7
+183   ABA7                  ; -------------------------------
+184   ABA7                  ; music update
+185   ABA7                  if (!NO_MUSIC)
+186   ABA7              MusicPos equ $+1
+187   ABA7 21 02 68             ld hl, MusicRegs - 1
+188   ABAA 11 43 6D             ld de, MusicRegs + RegisterFileLength
+189   ABAD 23                   inc hl
+190   ABAE B7                   or a
+191   ABAF ED 52                sbc hl, de
+192   ABB1 19                   add hl, de
+193   ABB2 38 11                jr c, NoMusicReset
+194   ABB4
+195   ABB4 21 38 B7             ld hl, BufferAddrChangeOp
+196   ABB7 7E                   ld a, (hl)
+197   ABB8 EE 01                xor 1
+198   ABBA 77                   ld (hl), a
+199   ABBB
+200   ABBB 21 8F B7             ld hl, BufferScanlineOp
+201   ABBE 7E                   ld a, (hl)
+202   ABBF EE 01                xor 1
+203   ABC1 77                   ld (hl), a
+204   ABC2
+205   ABC2 21 02 68             ld hl, MusicRegs - 1
+206   ABC5              NoMusicReset:
+207   ABC5 22 A8 AB             ld (MusicPos), hl
+208   ABC8
+209   ABC8                      ; set AY regs
+210   ABC8 EB                   ex de, hl
+211   ABC9 21 7E BA             ld hl, PrevRegs
+212   ABCC
+213   ABCC AF                   xor a
+214   ABCD                      MACRO MusicRegsUpdate
+215   ABCD ~                        ld bc, #fffd
+216   ABCD ~                        out (c), a
+217   ABCD ~                        ex af, af'
+218   ABCD ~                        ld a, (de)
+219   ABCD ~                        cp (hl)
+220   ABCD ~                        jr z, .SkipSameValue
+221   ABCD ~                        ld b, #bf
+222   ABCD ~                        out (c), a
+223   ABCD ~                        ld (hl), a
+224   ABCD ~            .SkipSameValue
+225   ABCD ~                        ex af, af'
+226   ABCD ~                        inc a
+227   ABCD ~                        inc hl
+228   ABCD ~                        ex de, hl
+229   ABCD ~                        ld bc, RegisterFileLength
+230   ABCD ~                        add hl, bc
+231   ABCD ~                        ex de, hl
+232   ABCD                      ENDM
+233   ABCD                      DUP NumRegistersSaved
+234   ABCD             >            MusicRegsUpdate
+234   ABCD 01 FD FF    >            ld bc, #fffd
+234   ABD0 ED 79       >            out (c), a
+234   ABD2 08          >            ex af, af'
+234   ABD3 1A          >            ld a, (de)
+234   ABD4 BE          >            cp (hl)
+234   ABD5 28 05       >            jr z, .SkipSameValue
+234   ABD7 06 BF       >            ld b, #bf
+234   ABD9 ED 79       >            out (c), a
+234   ABDB 77          >            ld (hl), a
+234   ABDC             >.SkipSameValue
+234   ABDC 08          >            ex af, af'
+234   ABDD 3C          >            inc a
+234   ABDE 23          >            inc hl
+234   ABDF EB          >            ex de, hl
+234   ABE0 01 40 05    >            ld bc, RegisterFileLength
+234   ABE3 09          >            add hl, bc
+234   ABE4 EB          >            ex de, hl
+234   ABE5             >            MusicRegsUpdate
+234   ABE5 01 FD FF    >            ld bc, #fffd
+234   ABE8 ED 79       >            out (c), a
+234   ABEA 08          >            ex af, af'
+234   ABEB 1A          >            ld a, (de)
+234   ABEC BE          >            cp (hl)
+234   ABED 28 05       >            jr z, .SkipSameValue
+234   ABEF 06 BF       >            ld b, #bf
+234   ABF1 ED 79       >            out (c), a
+234   ABF3 77          >            ld (hl), a
+234   ABF4             >.SkipSameValue
+234   ABF4 08          >            ex af, af'
+234   ABF5 3C          >            inc a
+234   ABF6 23          >            inc hl
+234   ABF7 EB          >            ex de, hl
+234   ABF8 01 40 05    >            ld bc, RegisterFileLength
+234   ABFB 09          >            add hl, bc
+234   ABFC EB          >            ex de, hl
+234   ABFD             >            MusicRegsUpdate
+234   ABFD 01 FD FF    >            ld bc, #fffd
+234   AC00 ED 79       >            out (c), a
+234   AC02 08          >            ex af, af'
+234   AC03 1A          >            ld a, (de)
+234   AC04 BE          >            cp (hl)
+234   AC05 28 05       >            jr z, .SkipSameValue
+234   AC07 06 BF       >            ld b, #bf
+234   AC09 ED 79       >            out (c), a
+234   AC0B 77          >            ld (hl), a
+234   AC0C             >.SkipSameValue
+234   AC0C 08          >            ex af, af'
+234   AC0D 3C          >            inc a
+234   AC0E 23          >            inc hl
+234   AC0F EB          >            ex de, hl
+234   AC10 01 40 05    >            ld bc, RegisterFileLength
+234   AC13 09          >            add hl, bc
+234   AC14 EB          >            ex de, hl
+234   AC15             >            MusicRegsUpdate
+234   AC15 01 FD FF    >            ld bc, #fffd
+234   AC18 ED 79       >            out (c), a
+234   AC1A 08          >            ex af, af'
+234   AC1B 1A          >            ld a, (de)
+234   AC1C BE          >            cp (hl)
+234   AC1D 28 05       >            jr z, .SkipSameValue
+234   AC1F 06 BF       >            ld b, #bf
+234   AC21 ED 79       >            out (c), a
+234   AC23 77          >            ld (hl), a
+234   AC24             >.SkipSameValue
+234   AC24 08          >            ex af, af'
+234   AC25 3C          >            inc a
+234   AC26 23          >            inc hl
+234   AC27 EB          >            ex de, hl
+234   AC28 01 40 05    >            ld bc, RegisterFileLength
+234   AC2B 09          >            add hl, bc
+234   AC2C EB          >            ex de, hl
+234   AC2D             >            MusicRegsUpdate
+234   AC2D 01 FD FF    >            ld bc, #fffd
+234   AC30 ED 79       >            out (c), a
+234   AC32 08          >            ex af, af'
+234   AC33 1A          >            ld a, (de)
+234   AC34 BE          >            cp (hl)
+234   AC35 28 05       >            jr z, .SkipSameValue
+234   AC37 06 BF       >            ld b, #bf
+234   AC39 ED 79       >            out (c), a
+234   AC3B 77          >            ld (hl), a
+234   AC3C             >.SkipSameValue
+234   AC3C 08          >            ex af, af'
+234   AC3D 3C          >            inc a
+234   AC3E 23          >            inc hl
+234   AC3F EB          >            ex de, hl
+234   AC40 01 40 05    >            ld bc, RegisterFileLength
+234   AC43 09          >            add hl, bc
+234   AC44 EB          >            ex de, hl
+234   AC45             >            MusicRegsUpdate
+234   AC45 01 FD FF    >            ld bc, #fffd
+234   AC48 ED 79       >            out (c), a
+234   AC4A 08          >            ex af, af'
+234   AC4B 1A          >            ld a, (de)
+234   AC4C BE          >            cp (hl)
+234   AC4D 28 05       >            jr z, .SkipSameValue
+234   AC4F 06 BF       >            ld b, #bf
+234   AC51 ED 79       >            out (c), a
+234   AC53 77          >            ld (hl), a
+234   AC54             >.SkipSameValue
+234   AC54 08          >            ex af, af'
+234   AC55 3C          >            inc a
+234   AC56 23          >            inc hl
+234   AC57 EB          >            ex de, hl
+234   AC58 01 40 05    >            ld bc, RegisterFileLength
+234   AC5B 09          >            add hl, bc
+234   AC5C EB          >            ex de, hl
+234   AC5D             >            MusicRegsUpdate
+234   AC5D 01 FD FF    >            ld bc, #fffd
+234   AC60 ED 79       >            out (c), a
+234   AC62 08          >            ex af, af'
+234   AC63 1A          >            ld a, (de)
+234   AC64 BE          >            cp (hl)
+234   AC65 28 05       >            jr z, .SkipSameValue
+234   AC67 06 BF       >            ld b, #bf
+234   AC69 ED 79       >            out (c), a
+234   AC6B 77          >            ld (hl), a
+234   AC6C             >.SkipSameValue
+234   AC6C 08          >            ex af, af'
+234   AC6D 3C          >            inc a
+234   AC6E 23          >            inc hl
+234   AC6F EB          >            ex de, hl
+234   AC70 01 40 05    >            ld bc, RegisterFileLength
+234   AC73 09          >            add hl, bc
+234   AC74 EB          >            ex de, hl
+234   AC75             >            MusicRegsUpdate
+234   AC75 01 FD FF    >            ld bc, #fffd
+234   AC78 ED 79       >            out (c), a
+234   AC7A 08          >            ex af, af'
+234   AC7B 1A          >            ld a, (de)
+234   AC7C BE          >            cp (hl)
+234   AC7D 28 05       >            jr z, .SkipSameValue
+234   AC7F 06 BF       >            ld b, #bf
+234   AC81 ED 79       >            out (c), a
+234   AC83 77          >            ld (hl), a
+234   AC84             >.SkipSameValue
+234   AC84 08          >            ex af, af'
+234   AC85 3C          >            inc a
+234   AC86 23          >            inc hl
+234   AC87 EB          >            ex de, hl
+234   AC88 01 40 05    >            ld bc, RegisterFileLength
+234   AC8B 09          >            add hl, bc
+234   AC8C EB          >            ex de, hl
+234   AC8D             >            MusicRegsUpdate
+234   AC8D 01 FD FF    >            ld bc, #fffd
+234   AC90 ED 79       >            out (c), a
+234   AC92 08          >            ex af, af'
+234   AC93 1A          >            ld a, (de)
+234   AC94 BE          >            cp (hl)
+234   AC95 28 05       >            jr z, .SkipSameValue
+234   AC97 06 BF       >            ld b, #bf
+234   AC99 ED 79       >            out (c), a
+234   AC9B 77          >            ld (hl), a
+234   AC9C             >.SkipSameValue
+234   AC9C 08          >            ex af, af'
+234   AC9D 3C          >            inc a
+234   AC9E 23          >            inc hl
+234   AC9F EB          >            ex de, hl
+234   ACA0 01 40 05    >            ld bc, RegisterFileLength
+234   ACA3 09          >            add hl, bc
+234   ACA4 EB          >            ex de, hl
+234   ACA5             >            MusicRegsUpdate
+234   ACA5 01 FD FF    >            ld bc, #fffd
+234   ACA8 ED 79       >            out (c), a
+234   ACAA 08          >            ex af, af'
+234   ACAB 1A          >            ld a, (de)
+234   ACAC BE          >            cp (hl)
+234   ACAD 28 05       >            jr z, .SkipSameValue
+234   ACAF 06 BF       >            ld b, #bf
+234   ACB1 ED 79       >            out (c), a
+234   ACB3 77          >            ld (hl), a
+234   ACB4             >.SkipSameValue
+234   ACB4 08          >            ex af, af'
+234   ACB5 3C          >            inc a
+234   ACB6 23          >            inc hl
+234   ACB7 EB          >            ex de, hl
+234   ACB8 01 40 05    >            ld bc, RegisterFileLength
+234   ACBB 09          >            add hl, bc
+234   ACBC EB          >            ex de, hl
+234   ACBD             >            MusicRegsUpdate
+234   ACBD 01 FD FF    >            ld bc, #fffd
+234   ACC0 ED 79       >            out (c), a
+234   ACC2 08          >            ex af, af'
+234   ACC3 1A          >            ld a, (de)
+234   ACC4 BE          >            cp (hl)
+234   ACC5 28 05       >            jr z, .SkipSameValue
+234   ACC7 06 BF       >            ld b, #bf
+234   ACC9 ED 79       >            out (c), a
+234   ACCB 77          >            ld (hl), a
+234   ACCC             >.SkipSameValue
+234   ACCC 08          >            ex af, af'
+234   ACCD 3C          >            inc a
+234   ACCE 23          >            inc hl
+234   ACCF EB          >            ex de, hl
+234   ACD0 01 40 05    >            ld bc, RegisterFileLength
+234   ACD3 09          >            add hl, bc
+234   ACD4 EB          >            ex de, hl
+234   ACD5             >            MusicRegsUpdate
+234   ACD5 01 FD FF    >            ld bc, #fffd
+234   ACD8 ED 79       >            out (c), a
+234   ACDA 08          >            ex af, af'
+234   ACDB 1A          >            ld a, (de)
+234   ACDC BE          >            cp (hl)
+234   ACDD 28 05       >            jr z, .SkipSameValue
+234   ACDF 06 BF       >            ld b, #bf
+234   ACE1 ED 79       >            out (c), a
+234   ACE3 77          >            ld (hl), a
+234   ACE4             >.SkipSameValue
+234   ACE4 08          >            ex af, af'
+234   ACE5 3C          >            inc a
+234   ACE6 23          >            inc hl
+234   ACE7 EB          >            ex de, hl
+234   ACE8 01 40 05    >            ld bc, RegisterFileLength
+234   ACEB 09          >            add hl, bc
+234   ACEC EB          >            ex de, hl
+235   ACED                      EDUP
+236   ACED                  endif // NO_MUSIC
+237   ACED
+238   ACED                  ; ----------------------------
+239   ACED                  ; snow update + draw
+240   ACED
+241   ACED                  ; calculate the buffer number to print
+242   ACED                  ; each buffer takes about 2KB and there are 8 buffers per page
+243   ACED                  ; so the buffer number goes from 0 to NUM_BUFFER_PAGES*8 - 1
+244   ACED
+245   ACED              CurrentBuffer equ $+1
+246   ACED 3E 00            ld a, 0
+247   ACEF 3C               inc a
+248   ACF0 FE 30            cp NUM_BUFFER_PAGES*8
+249   ACF2 38 01            jr c, CurrentBufferReady
+250   ACF4 AF               xor a
+251   ACF5              CurrentBufferReady:
+252   ACF5 32 EE AC         ld (CurrentBuffer), a
+253   ACF8
+254   ACF8 5F               ld e, a
+255   ACF9 CB 2F            sra a
+256   ACFB CB 2F            sra a
+257   ACFD CB 2F            sra a
+258   ACFF 6F               ld l, a
+259   AD00 26 B9            ld h, high BufferPages
+260   AD02 7E               ld a, (hl)
+261   AD03                  SetPageInA
+261   AD03 32 5C 5B    >        ld ($5b5c), a   ; BANKM
+261   AD06 01 FD 7F    >        ld bc, #7ffd
+261   AD09 ED 79       >        out (c), a
+262   AD0B 7B               ld a, e
+263   AD0C E6 07            and $07
+264   AD0E                  ; Since buffers are 64 x 32, they are stored in planes. First 256 bytes contain 0th scanline of all 8 buffers, next 256 bytes - 1st scanline, and so forth
+265   AD0E                  ; This allows moving down by simply incrementing h
+266   AD0E                  ; so all we need is an offset, i.e. multiplication by 32
+267   AD0E 87               add a       ; x2
+268   AD0F 87               add a       ; x4
+269   AD10 87               add a       ; x8
+270   AD11 87               add a       ; x16
+271   AD12 87               add a       ; x32
+272   AD13 6F               ld l, a
+273   AD14 26 C0            ld h, $c0
+274   AD16                  ; current buffer address is ready
+275   AD16
+276   AD16 CD DA B7         call rnd
+277   AD19 47               ld b, a
+278   AD1A
+279   AD1A                  ; update the snow
+280   AD1A DD 21 00 BA      ld ix, SnowflakesBuffer
+281   AD1E                  DUP NUM_SNOWFLAKES
+282   AD1E             >        ; Ypos: +0, +1
+283   AD1E             >        ; Yspeed: +2, +3
+284   AD1E             >        ; Xpos: +4, +5
+285   AD1E 78          >        ld a, b
+286   AD1F DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AD22 DD 86 04    >        add (ix + Snowflake.XPos)
+288   AD25 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   AD28 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   AD2B CB 78       >        bit 7, b
+291   AD2D 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   AD2F CE 00       >        adc 0
+293   AD31 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   AD33             >3 ; TurnSnowflakeLeft
+295   AD33 DE 00       >        sbc 0
+296   AD35             >4 ; ContinueSnowFlakeUpdate
+297   AD35 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   AD38             >
+299   AD38 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   AD3B DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   AD3E DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   AD41 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   AD44 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   AD47 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   AD4A             >
+306   AD4A D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   AD4C 38 3F       >        jr c, 1F    ; NextSnowflake
+308   AD4E             >
+309   AD4E             >        ; check if we need to reset this snowflake
+310   AD4E FE 40       >        cp 64
+311   AD50 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   AD52             >
+313   AD52             >        ; plot it!
+314   AD52 57          >        ld d, a
+315   AD53 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   AD56 5F          >        ld e, a
+317   AD57 CB 3B       >        srl e
+318   AD59 CB 3B       >        srl e
+319   AD5B CB 3B       >        srl e
+320   AD5D E6 07       >        and $07
+321   AD5F E5          >        push hl
+322   AD60 19          >        add hl, de
+323   AD61 5F          >        ld e, a
+324   AD62 16 B8       >        ld d, high PointTable
+325   AD64 1A          >        ld a, (de)
+326   AD65 B6          >        or (hl)
+327   AD66 77          >        ld (hl), a
+328   AD67 E1          >        pop hl
+329   AD68 18 23       >        jr 1F       ; NextSnowflake
+330   AD6A             >
+331   AD6A             >2 ; ResetSnowflake
+332   AD6A             >        ResetSnowflake
+332   AD6A AF          >        xor a
+332   AD6B DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   AD6E DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   AD71             >
+332   AD71 CD DA B7    >        call rnd
+332   AD74 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   AD77 CD DA B7    >        call rnd
+332   AD7A E6 0F       >        and $0f
+332   AD7C DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   AD7F             >
+332   AD7F CD DA B7    >        call rnd
+332   AD82 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AD85             >
+332   AD85 CD DA B7    >        call rnd
+332   AD88 F6 20       >        or $20
+332   AD8A DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AD8D             >1 ; NextSnowflake
+334   AD8D             >        AdvanceToNextSnowflake
+334   AD8D             >        if (1)  ; compresses better
+334   AD8D DD 23       >            inc ix
+334   AD8F DD 23       >            inc ix
+334   AD91 DD 23       >            inc ix
+334   AD93 DD 23       >            inc ix
+334   AD95 DD 23       >            inc ix
+334   AD97 DD 23       >            inc ix
+334   AD99             >        else
+334   AD99 ~           >            ld de, 6
+334   AD99 ~           >            add ix, de
+334   AD99             >        endif
+282   AD99             >        ; Ypos: +0, +1
+283   AD99             >        ; Yspeed: +2, +3
+284   AD99             >        ; Xpos: +4, +5
+285   AD99 78          >        ld a, b
+286   AD9A DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AD9D DD 86 04    >        add (ix + Snowflake.XPos)
+288   ADA0 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   ADA3 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   ADA6 CB 78       >        bit 7, b
+291   ADA8 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   ADAA CE 00       >        adc 0
+293   ADAC 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   ADAE             >3 ; TurnSnowflakeLeft
+295   ADAE DE 00       >        sbc 0
+296   ADB0             >4 ; ContinueSnowFlakeUpdate
+297   ADB0 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   ADB3             >
+299   ADB3 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   ADB6 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   ADB9 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   ADBC DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   ADBF DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   ADC2 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   ADC5             >
+306   ADC5 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   ADC7 38 3F       >        jr c, 1F    ; NextSnowflake
+308   ADC9             >
+309   ADC9             >        ; check if we need to reset this snowflake
+310   ADC9 FE 40       >        cp 64
+311   ADCB 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   ADCD             >
+313   ADCD             >        ; plot it!
+314   ADCD 57          >        ld d, a
+315   ADCE DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   ADD1 5F          >        ld e, a
+317   ADD2 CB 3B       >        srl e
+318   ADD4 CB 3B       >        srl e
+319   ADD6 CB 3B       >        srl e
+320   ADD8 E6 07       >        and $07
+321   ADDA E5          >        push hl
+322   ADDB 19          >        add hl, de
+323   ADDC 5F          >        ld e, a
+324   ADDD 16 B8       >        ld d, high PointTable
+325   ADDF 1A          >        ld a, (de)
+326   ADE0 B6          >        or (hl)
+327   ADE1 77          >        ld (hl), a
+328   ADE2 E1          >        pop hl
+329   ADE3 18 23       >        jr 1F       ; NextSnowflake
+330   ADE5             >
+331   ADE5             >2 ; ResetSnowflake
+332   ADE5             >        ResetSnowflake
+332   ADE5 AF          >        xor a
+332   ADE6 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   ADE9 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   ADEC             >
+332   ADEC CD DA B7    >        call rnd
+332   ADEF DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   ADF2 CD DA B7    >        call rnd
+332   ADF5 E6 0F       >        and $0f
+332   ADF7 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   ADFA             >
+332   ADFA CD DA B7    >        call rnd
+332   ADFD DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AE00             >
+332   AE00 CD DA B7    >        call rnd
+332   AE03 F6 20       >        or $20
+332   AE05 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AE08             >1 ; NextSnowflake
+334   AE08             >        AdvanceToNextSnowflake
+334   AE08             >        if (1)  ; compresses better
+334   AE08 DD 23       >            inc ix
+334   AE0A DD 23       >            inc ix
+334   AE0C DD 23       >            inc ix
+334   AE0E DD 23       >            inc ix
+334   AE10 DD 23       >            inc ix
+334   AE12 DD 23       >            inc ix
+334   AE14             >        else
+334   AE14 ~           >            ld de, 6
+334   AE14 ~           >            add ix, de
+334   AE14             >        endif
+282   AE14             >        ; Ypos: +0, +1
+283   AE14             >        ; Yspeed: +2, +3
+284   AE14             >        ; Xpos: +4, +5
+285   AE14 78          >        ld a, b
+286   AE15 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AE18 DD 86 04    >        add (ix + Snowflake.XPos)
+288   AE1B DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   AE1E DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   AE21 CB 78       >        bit 7, b
+291   AE23 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   AE25 CE 00       >        adc 0
+293   AE27 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   AE29             >3 ; TurnSnowflakeLeft
+295   AE29 DE 00       >        sbc 0
+296   AE2B             >4 ; ContinueSnowFlakeUpdate
+297   AE2B DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   AE2E             >
+299   AE2E DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   AE31 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   AE34 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   AE37 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   AE3A DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   AE3D DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   AE40             >
+306   AE40 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   AE42 38 3F       >        jr c, 1F    ; NextSnowflake
+308   AE44             >
+309   AE44             >        ; check if we need to reset this snowflake
+310   AE44 FE 40       >        cp 64
+311   AE46 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   AE48             >
+313   AE48             >        ; plot it!
+314   AE48 57          >        ld d, a
+315   AE49 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   AE4C 5F          >        ld e, a
+317   AE4D CB 3B       >        srl e
+318   AE4F CB 3B       >        srl e
+319   AE51 CB 3B       >        srl e
+320   AE53 E6 07       >        and $07
+321   AE55 E5          >        push hl
+322   AE56 19          >        add hl, de
+323   AE57 5F          >        ld e, a
+324   AE58 16 B8       >        ld d, high PointTable
+325   AE5A 1A          >        ld a, (de)
+326   AE5B B6          >        or (hl)
+327   AE5C 77          >        ld (hl), a
+328   AE5D E1          >        pop hl
+329   AE5E 18 23       >        jr 1F       ; NextSnowflake
+330   AE60             >
+331   AE60             >2 ; ResetSnowflake
+332   AE60             >        ResetSnowflake
+332   AE60 AF          >        xor a
+332   AE61 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   AE64 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   AE67             >
+332   AE67 CD DA B7    >        call rnd
+332   AE6A DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   AE6D CD DA B7    >        call rnd
+332   AE70 E6 0F       >        and $0f
+332   AE72 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   AE75             >
+332   AE75 CD DA B7    >        call rnd
+332   AE78 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AE7B             >
+332   AE7B CD DA B7    >        call rnd
+332   AE7E F6 20       >        or $20
+332   AE80 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AE83             >1 ; NextSnowflake
+334   AE83             >        AdvanceToNextSnowflake
+334   AE83             >        if (1)  ; compresses better
+334   AE83 DD 23       >            inc ix
+334   AE85 DD 23       >            inc ix
+334   AE87 DD 23       >            inc ix
+334   AE89 DD 23       >            inc ix
+334   AE8B DD 23       >            inc ix
+334   AE8D DD 23       >            inc ix
+334   AE8F             >        else
+334   AE8F ~           >            ld de, 6
+334   AE8F ~           >            add ix, de
+334   AE8F             >        endif
+282   AE8F             >        ; Ypos: +0, +1
+283   AE8F             >        ; Yspeed: +2, +3
+284   AE8F             >        ; Xpos: +4, +5
+285   AE8F 78          >        ld a, b
+286   AE90 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AE93 DD 86 04    >        add (ix + Snowflake.XPos)
+288   AE96 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   AE99 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   AE9C CB 78       >        bit 7, b
+291   AE9E 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   AEA0 CE 00       >        adc 0
+293   AEA2 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   AEA4             >3 ; TurnSnowflakeLeft
+295   AEA4 DE 00       >        sbc 0
+296   AEA6             >4 ; ContinueSnowFlakeUpdate
+297   AEA6 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   AEA9             >
+299   AEA9 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   AEAC DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   AEAF DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   AEB2 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   AEB5 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   AEB8 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   AEBB             >
+306   AEBB D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   AEBD 38 3F       >        jr c, 1F    ; NextSnowflake
+308   AEBF             >
+309   AEBF             >        ; check if we need to reset this snowflake
+310   AEBF FE 40       >        cp 64
+311   AEC1 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   AEC3             >
+313   AEC3             >        ; plot it!
+314   AEC3 57          >        ld d, a
+315   AEC4 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   AEC7 5F          >        ld e, a
+317   AEC8 CB 3B       >        srl e
+318   AECA CB 3B       >        srl e
+319   AECC CB 3B       >        srl e
+320   AECE E6 07       >        and $07
+321   AED0 E5          >        push hl
+322   AED1 19          >        add hl, de
+323   AED2 5F          >        ld e, a
+324   AED3 16 B8       >        ld d, high PointTable
+325   AED5 1A          >        ld a, (de)
+326   AED6 B6          >        or (hl)
+327   AED7 77          >        ld (hl), a
+328   AED8 E1          >        pop hl
+329   AED9 18 23       >        jr 1F       ; NextSnowflake
+330   AEDB             >
+331   AEDB             >2 ; ResetSnowflake
+332   AEDB             >        ResetSnowflake
+332   AEDB AF          >        xor a
+332   AEDC DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   AEDF DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   AEE2             >
+332   AEE2 CD DA B7    >        call rnd
+332   AEE5 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   AEE8 CD DA B7    >        call rnd
+332   AEEB E6 0F       >        and $0f
+332   AEED DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   AEF0             >
+332   AEF0 CD DA B7    >        call rnd
+332   AEF3 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AEF6             >
+332   AEF6 CD DA B7    >        call rnd
+332   AEF9 F6 20       >        or $20
+332   AEFB DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AEFE             >1 ; NextSnowflake
+334   AEFE             >        AdvanceToNextSnowflake
+334   AEFE             >        if (1)  ; compresses better
+334   AEFE DD 23       >            inc ix
+334   AF00 DD 23       >            inc ix
+334   AF02 DD 23       >            inc ix
+334   AF04 DD 23       >            inc ix
+334   AF06 DD 23       >            inc ix
+334   AF08 DD 23       >            inc ix
+334   AF0A             >        else
+334   AF0A ~           >            ld de, 6
+334   AF0A ~           >            add ix, de
+334   AF0A             >        endif
+282   AF0A             >        ; Ypos: +0, +1
+283   AF0A             >        ; Yspeed: +2, +3
+284   AF0A             >        ; Xpos: +4, +5
+285   AF0A 78          >        ld a, b
+286   AF0B DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AF0E DD 86 04    >        add (ix + Snowflake.XPos)
+288   AF11 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   AF14 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   AF17 CB 78       >        bit 7, b
+291   AF19 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   AF1B CE 00       >        adc 0
+293   AF1D 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   AF1F             >3 ; TurnSnowflakeLeft
+295   AF1F DE 00       >        sbc 0
+296   AF21             >4 ; ContinueSnowFlakeUpdate
+297   AF21 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   AF24             >
+299   AF24 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   AF27 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   AF2A DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   AF2D DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   AF30 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   AF33 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   AF36             >
+306   AF36 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   AF38 38 3F       >        jr c, 1F    ; NextSnowflake
+308   AF3A             >
+309   AF3A             >        ; check if we need to reset this snowflake
+310   AF3A FE 40       >        cp 64
+311   AF3C 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   AF3E             >
+313   AF3E             >        ; plot it!
+314   AF3E 57          >        ld d, a
+315   AF3F DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   AF42 5F          >        ld e, a
+317   AF43 CB 3B       >        srl e
+318   AF45 CB 3B       >        srl e
+319   AF47 CB 3B       >        srl e
+320   AF49 E6 07       >        and $07
+321   AF4B E5          >        push hl
+322   AF4C 19          >        add hl, de
+323   AF4D 5F          >        ld e, a
+324   AF4E 16 B8       >        ld d, high PointTable
+325   AF50 1A          >        ld a, (de)
+326   AF51 B6          >        or (hl)
+327   AF52 77          >        ld (hl), a
+328   AF53 E1          >        pop hl
+329   AF54 18 23       >        jr 1F       ; NextSnowflake
+330   AF56             >
+331   AF56             >2 ; ResetSnowflake
+332   AF56             >        ResetSnowflake
+332   AF56 AF          >        xor a
+332   AF57 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   AF5A DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   AF5D             >
+332   AF5D CD DA B7    >        call rnd
+332   AF60 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   AF63 CD DA B7    >        call rnd
+332   AF66 E6 0F       >        and $0f
+332   AF68 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   AF6B             >
+332   AF6B CD DA B7    >        call rnd
+332   AF6E DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AF71             >
+332   AF71 CD DA B7    >        call rnd
+332   AF74 F6 20       >        or $20
+332   AF76 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AF79             >1 ; NextSnowflake
+334   AF79             >        AdvanceToNextSnowflake
+334   AF79             >        if (1)  ; compresses better
+334   AF79 DD 23       >            inc ix
+334   AF7B DD 23       >            inc ix
+334   AF7D DD 23       >            inc ix
+334   AF7F DD 23       >            inc ix
+334   AF81 DD 23       >            inc ix
+334   AF83 DD 23       >            inc ix
+334   AF85             >        else
+334   AF85 ~           >            ld de, 6
+334   AF85 ~           >            add ix, de
+334   AF85             >        endif
+282   AF85             >        ; Ypos: +0, +1
+283   AF85             >        ; Yspeed: +2, +3
+284   AF85             >        ; Xpos: +4, +5
+285   AF85 78          >        ld a, b
+286   AF86 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   AF89 DD 86 04    >        add (ix + Snowflake.XPos)
+288   AF8C DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   AF8F DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   AF92 CB 78       >        bit 7, b
+291   AF94 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   AF96 CE 00       >        adc 0
+293   AF98 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   AF9A             >3 ; TurnSnowflakeLeft
+295   AF9A DE 00       >        sbc 0
+296   AF9C             >4 ; ContinueSnowFlakeUpdate
+297   AF9C DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   AF9F             >
+299   AF9F DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   AFA2 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   AFA5 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   AFA8 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   AFAB DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   AFAE DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   AFB1             >
+306   AFB1 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   AFB3 38 3F       >        jr c, 1F    ; NextSnowflake
+308   AFB5             >
+309   AFB5             >        ; check if we need to reset this snowflake
+310   AFB5 FE 40       >        cp 64
+311   AFB7 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   AFB9             >
+313   AFB9             >        ; plot it!
+314   AFB9 57          >        ld d, a
+315   AFBA DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   AFBD 5F          >        ld e, a
+317   AFBE CB 3B       >        srl e
+318   AFC0 CB 3B       >        srl e
+319   AFC2 CB 3B       >        srl e
+320   AFC4 E6 07       >        and $07
+321   AFC6 E5          >        push hl
+322   AFC7 19          >        add hl, de
+323   AFC8 5F          >        ld e, a
+324   AFC9 16 B8       >        ld d, high PointTable
+325   AFCB 1A          >        ld a, (de)
+326   AFCC B6          >        or (hl)
+327   AFCD 77          >        ld (hl), a
+328   AFCE E1          >        pop hl
+329   AFCF 18 23       >        jr 1F       ; NextSnowflake
+330   AFD1             >
+331   AFD1             >2 ; ResetSnowflake
+332   AFD1             >        ResetSnowflake
+332   AFD1 AF          >        xor a
+332   AFD2 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   AFD5 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   AFD8             >
+332   AFD8 CD DA B7    >        call rnd
+332   AFDB DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   AFDE CD DA B7    >        call rnd
+332   AFE1 E6 0F       >        and $0f
+332   AFE3 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   AFE6             >
+332   AFE6 CD DA B7    >        call rnd
+332   AFE9 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   AFEC             >
+332   AFEC CD DA B7    >        call rnd
+332   AFEF F6 20       >        or $20
+332   AFF1 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   AFF4             >1 ; NextSnowflake
+334   AFF4             >        AdvanceToNextSnowflake
+334   AFF4             >        if (1)  ; compresses better
+334   AFF4 DD 23       >            inc ix
+334   AFF6 DD 23       >            inc ix
+334   AFF8 DD 23       >            inc ix
+334   AFFA DD 23       >            inc ix
+334   AFFC DD 23       >            inc ix
+334   AFFE DD 23       >            inc ix
+334   B000             >        else
+334   B000 ~           >            ld de, 6
+334   B000 ~           >            add ix, de
+334   B000             >        endif
+282   B000             >        ; Ypos: +0, +1
+283   B000             >        ; Yspeed: +2, +3
+284   B000             >        ; Xpos: +4, +5
+285   B000 78          >        ld a, b
+286   B001 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B004 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B007 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B00A DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B00D CB 78       >        bit 7, b
+291   B00F 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B011 CE 00       >        adc 0
+293   B013 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B015             >3 ; TurnSnowflakeLeft
+295   B015 DE 00       >        sbc 0
+296   B017             >4 ; ContinueSnowFlakeUpdate
+297   B017 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B01A             >
+299   B01A DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B01D DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B020 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B023 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B026 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B029 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B02C             >
+306   B02C D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B02E 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B030             >
+309   B030             >        ; check if we need to reset this snowflake
+310   B030 FE 40       >        cp 64
+311   B032 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B034             >
+313   B034             >        ; plot it!
+314   B034 57          >        ld d, a
+315   B035 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B038 5F          >        ld e, a
+317   B039 CB 3B       >        srl e
+318   B03B CB 3B       >        srl e
+319   B03D CB 3B       >        srl e
+320   B03F E6 07       >        and $07
+321   B041 E5          >        push hl
+322   B042 19          >        add hl, de
+323   B043 5F          >        ld e, a
+324   B044 16 B8       >        ld d, high PointTable
+325   B046 1A          >        ld a, (de)
+326   B047 B6          >        or (hl)
+327   B048 77          >        ld (hl), a
+328   B049 E1          >        pop hl
+329   B04A 18 23       >        jr 1F       ; NextSnowflake
+330   B04C             >
+331   B04C             >2 ; ResetSnowflake
+332   B04C             >        ResetSnowflake
+332   B04C AF          >        xor a
+332   B04D DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B050 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B053             >
+332   B053 CD DA B7    >        call rnd
+332   B056 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B059 CD DA B7    >        call rnd
+332   B05C E6 0F       >        and $0f
+332   B05E DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B061             >
+332   B061 CD DA B7    >        call rnd
+332   B064 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B067             >
+332   B067 CD DA B7    >        call rnd
+332   B06A F6 20       >        or $20
+332   B06C DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B06F             >1 ; NextSnowflake
+334   B06F             >        AdvanceToNextSnowflake
+334   B06F             >        if (1)  ; compresses better
+334   B06F DD 23       >            inc ix
+334   B071 DD 23       >            inc ix
+334   B073 DD 23       >            inc ix
+334   B075 DD 23       >            inc ix
+334   B077 DD 23       >            inc ix
+334   B079 DD 23       >            inc ix
+334   B07B             >        else
+334   B07B ~           >            ld de, 6
+334   B07B ~           >            add ix, de
+334   B07B             >        endif
+282   B07B             >        ; Ypos: +0, +1
+283   B07B             >        ; Yspeed: +2, +3
+284   B07B             >        ; Xpos: +4, +5
+285   B07B 78          >        ld a, b
+286   B07C DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B07F DD 86 04    >        add (ix + Snowflake.XPos)
+288   B082 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B085 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B088 CB 78       >        bit 7, b
+291   B08A 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B08C CE 00       >        adc 0
+293   B08E 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B090             >3 ; TurnSnowflakeLeft
+295   B090 DE 00       >        sbc 0
+296   B092             >4 ; ContinueSnowFlakeUpdate
+297   B092 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B095             >
+299   B095 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B098 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B09B DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B09E DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B0A1 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B0A4 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B0A7             >
+306   B0A7 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B0A9 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B0AB             >
+309   B0AB             >        ; check if we need to reset this snowflake
+310   B0AB FE 40       >        cp 64
+311   B0AD 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B0AF             >
+313   B0AF             >        ; plot it!
+314   B0AF 57          >        ld d, a
+315   B0B0 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B0B3 5F          >        ld e, a
+317   B0B4 CB 3B       >        srl e
+318   B0B6 CB 3B       >        srl e
+319   B0B8 CB 3B       >        srl e
+320   B0BA E6 07       >        and $07
+321   B0BC E5          >        push hl
+322   B0BD 19          >        add hl, de
+323   B0BE 5F          >        ld e, a
+324   B0BF 16 B8       >        ld d, high PointTable
+325   B0C1 1A          >        ld a, (de)
+326   B0C2 B6          >        or (hl)
+327   B0C3 77          >        ld (hl), a
+328   B0C4 E1          >        pop hl
+329   B0C5 18 23       >        jr 1F       ; NextSnowflake
+330   B0C7             >
+331   B0C7             >2 ; ResetSnowflake
+332   B0C7             >        ResetSnowflake
+332   B0C7 AF          >        xor a
+332   B0C8 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B0CB DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B0CE             >
+332   B0CE CD DA B7    >        call rnd
+332   B0D1 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B0D4 CD DA B7    >        call rnd
+332   B0D7 E6 0F       >        and $0f
+332   B0D9 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B0DC             >
+332   B0DC CD DA B7    >        call rnd
+332   B0DF DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B0E2             >
+332   B0E2 CD DA B7    >        call rnd
+332   B0E5 F6 20       >        or $20
+332   B0E7 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B0EA             >1 ; NextSnowflake
+334   B0EA             >        AdvanceToNextSnowflake
+334   B0EA             >        if (1)  ; compresses better
+334   B0EA DD 23       >            inc ix
+334   B0EC DD 23       >            inc ix
+334   B0EE DD 23       >            inc ix
+334   B0F0 DD 23       >            inc ix
+334   B0F2 DD 23       >            inc ix
+334   B0F4 DD 23       >            inc ix
+334   B0F6             >        else
+334   B0F6 ~           >            ld de, 6
+334   B0F6 ~           >            add ix, de
+334   B0F6             >        endif
+282   B0F6             >        ; Ypos: +0, +1
+283   B0F6             >        ; Yspeed: +2, +3
+284   B0F6             >        ; Xpos: +4, +5
+285   B0F6 78          >        ld a, b
+286   B0F7 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B0FA DD 86 04    >        add (ix + Snowflake.XPos)
+288   B0FD DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B100 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B103 CB 78       >        bit 7, b
+291   B105 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B107 CE 00       >        adc 0
+293   B109 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B10B             >3 ; TurnSnowflakeLeft
+295   B10B DE 00       >        sbc 0
+296   B10D             >4 ; ContinueSnowFlakeUpdate
+297   B10D DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B110             >
+299   B110 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B113 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B116 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B119 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B11C DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B11F DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B122             >
+306   B122 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B124 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B126             >
+309   B126             >        ; check if we need to reset this snowflake
+310   B126 FE 40       >        cp 64
+311   B128 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B12A             >
+313   B12A             >        ; plot it!
+314   B12A 57          >        ld d, a
+315   B12B DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B12E 5F          >        ld e, a
+317   B12F CB 3B       >        srl e
+318   B131 CB 3B       >        srl e
+319   B133 CB 3B       >        srl e
+320   B135 E6 07       >        and $07
+321   B137 E5          >        push hl
+322   B138 19          >        add hl, de
+323   B139 5F          >        ld e, a
+324   B13A 16 B8       >        ld d, high PointTable
+325   B13C 1A          >        ld a, (de)
+326   B13D B6          >        or (hl)
+327   B13E 77          >        ld (hl), a
+328   B13F E1          >        pop hl
+329   B140 18 23       >        jr 1F       ; NextSnowflake
+330   B142             >
+331   B142             >2 ; ResetSnowflake
+332   B142             >        ResetSnowflake
+332   B142 AF          >        xor a
+332   B143 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B146 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B149             >
+332   B149 CD DA B7    >        call rnd
+332   B14C DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B14F CD DA B7    >        call rnd
+332   B152 E6 0F       >        and $0f
+332   B154 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B157             >
+332   B157 CD DA B7    >        call rnd
+332   B15A DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B15D             >
+332   B15D CD DA B7    >        call rnd
+332   B160 F6 20       >        or $20
+332   B162 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B165             >1 ; NextSnowflake
+334   B165             >        AdvanceToNextSnowflake
+334   B165             >        if (1)  ; compresses better
+334   B165 DD 23       >            inc ix
+334   B167 DD 23       >            inc ix
+334   B169 DD 23       >            inc ix
+334   B16B DD 23       >            inc ix
+334   B16D DD 23       >            inc ix
+334   B16F DD 23       >            inc ix
+334   B171             >        else
+334   B171 ~           >            ld de, 6
+334   B171 ~           >            add ix, de
+334   B171             >        endif
+282   B171             >        ; Ypos: +0, +1
+283   B171             >        ; Yspeed: +2, +3
+284   B171             >        ; Xpos: +4, +5
+285   B171 78          >        ld a, b
+286   B172 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B175 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B178 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B17B DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B17E CB 78       >        bit 7, b
+291   B180 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B182 CE 00       >        adc 0
+293   B184 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B186             >3 ; TurnSnowflakeLeft
+295   B186 DE 00       >        sbc 0
+296   B188             >4 ; ContinueSnowFlakeUpdate
+297   B188 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B18B             >
+299   B18B DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B18E DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B191 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B194 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B197 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B19A DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B19D             >
+306   B19D D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B19F 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B1A1             >
+309   B1A1             >        ; check if we need to reset this snowflake
+310   B1A1 FE 40       >        cp 64
+311   B1A3 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B1A5             >
+313   B1A5             >        ; plot it!
+314   B1A5 57          >        ld d, a
+315   B1A6 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B1A9 5F          >        ld e, a
+317   B1AA CB 3B       >        srl e
+318   B1AC CB 3B       >        srl e
+319   B1AE CB 3B       >        srl e
+320   B1B0 E6 07       >        and $07
+321   B1B2 E5          >        push hl
+322   B1B3 19          >        add hl, de
+323   B1B4 5F          >        ld e, a
+324   B1B5 16 B8       >        ld d, high PointTable
+325   B1B7 1A          >        ld a, (de)
+326   B1B8 B6          >        or (hl)
+327   B1B9 77          >        ld (hl), a
+328   B1BA E1          >        pop hl
+329   B1BB 18 23       >        jr 1F       ; NextSnowflake
+330   B1BD             >
+331   B1BD             >2 ; ResetSnowflake
+332   B1BD             >        ResetSnowflake
+332   B1BD AF          >        xor a
+332   B1BE DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B1C1 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B1C4             >
+332   B1C4 CD DA B7    >        call rnd
+332   B1C7 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B1CA CD DA B7    >        call rnd
+332   B1CD E6 0F       >        and $0f
+332   B1CF DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B1D2             >
+332   B1D2 CD DA B7    >        call rnd
+332   B1D5 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B1D8             >
+332   B1D8 CD DA B7    >        call rnd
+332   B1DB F6 20       >        or $20
+332   B1DD DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B1E0             >1 ; NextSnowflake
+334   B1E0             >        AdvanceToNextSnowflake
+334   B1E0             >        if (1)  ; compresses better
+334   B1E0 DD 23       >            inc ix
+334   B1E2 DD 23       >            inc ix
+334   B1E4 DD 23       >            inc ix
+334   B1E6 DD 23       >            inc ix
+334   B1E8 DD 23       >            inc ix
+334   B1EA DD 23       >            inc ix
+334   B1EC             >        else
+334   B1EC ~           >            ld de, 6
+334   B1EC ~           >            add ix, de
+334   B1EC             >        endif
+282   B1EC             >        ; Ypos: +0, +1
+283   B1EC             >        ; Yspeed: +2, +3
+284   B1EC             >        ; Xpos: +4, +5
+285   B1EC 78          >        ld a, b
+286   B1ED DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B1F0 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B1F3 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B1F6 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B1F9 CB 78       >        bit 7, b
+291   B1FB 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B1FD CE 00       >        adc 0
+293   B1FF 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B201             >3 ; TurnSnowflakeLeft
+295   B201 DE 00       >        sbc 0
+296   B203             >4 ; ContinueSnowFlakeUpdate
+297   B203 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B206             >
+299   B206 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B209 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B20C DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B20F DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B212 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B215 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B218             >
+306   B218 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B21A 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B21C             >
+309   B21C             >        ; check if we need to reset this snowflake
+310   B21C FE 40       >        cp 64
+311   B21E 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B220             >
+313   B220             >        ; plot it!
+314   B220 57          >        ld d, a
+315   B221 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B224 5F          >        ld e, a
+317   B225 CB 3B       >        srl e
+318   B227 CB 3B       >        srl e
+319   B229 CB 3B       >        srl e
+320   B22B E6 07       >        and $07
+321   B22D E5          >        push hl
+322   B22E 19          >        add hl, de
+323   B22F 5F          >        ld e, a
+324   B230 16 B8       >        ld d, high PointTable
+325   B232 1A          >        ld a, (de)
+326   B233 B6          >        or (hl)
+327   B234 77          >        ld (hl), a
+328   B235 E1          >        pop hl
+329   B236 18 23       >        jr 1F       ; NextSnowflake
+330   B238             >
+331   B238             >2 ; ResetSnowflake
+332   B238             >        ResetSnowflake
+332   B238 AF          >        xor a
+332   B239 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B23C DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B23F             >
+332   B23F CD DA B7    >        call rnd
+332   B242 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B245 CD DA B7    >        call rnd
+332   B248 E6 0F       >        and $0f
+332   B24A DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B24D             >
+332   B24D CD DA B7    >        call rnd
+332   B250 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B253             >
+332   B253 CD DA B7    >        call rnd
+332   B256 F6 20       >        or $20
+332   B258 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B25B             >1 ; NextSnowflake
+334   B25B             >        AdvanceToNextSnowflake
+334   B25B             >        if (1)  ; compresses better
+334   B25B DD 23       >            inc ix
+334   B25D DD 23       >            inc ix
+334   B25F DD 23       >            inc ix
+334   B261 DD 23       >            inc ix
+334   B263 DD 23       >            inc ix
+334   B265 DD 23       >            inc ix
+334   B267             >        else
+334   B267 ~           >            ld de, 6
+334   B267 ~           >            add ix, de
+334   B267             >        endif
+282   B267             >        ; Ypos: +0, +1
+283   B267             >        ; Yspeed: +2, +3
+284   B267             >        ; Xpos: +4, +5
+285   B267 78          >        ld a, b
+286   B268 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B26B DD 86 04    >        add (ix + Snowflake.XPos)
+288   B26E DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B271 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B274 CB 78       >        bit 7, b
+291   B276 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B278 CE 00       >        adc 0
+293   B27A 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B27C             >3 ; TurnSnowflakeLeft
+295   B27C DE 00       >        sbc 0
+296   B27E             >4 ; ContinueSnowFlakeUpdate
+297   B27E DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B281             >
+299   B281 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B284 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B287 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B28A DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B28D DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B290 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B293             >
+306   B293 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B295 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B297             >
+309   B297             >        ; check if we need to reset this snowflake
+310   B297 FE 40       >        cp 64
+311   B299 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B29B             >
+313   B29B             >        ; plot it!
+314   B29B 57          >        ld d, a
+315   B29C DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B29F 5F          >        ld e, a
+317   B2A0 CB 3B       >        srl e
+318   B2A2 CB 3B       >        srl e
+319   B2A4 CB 3B       >        srl e
+320   B2A6 E6 07       >        and $07
+321   B2A8 E5          >        push hl
+322   B2A9 19          >        add hl, de
+323   B2AA 5F          >        ld e, a
+324   B2AB 16 B8       >        ld d, high PointTable
+325   B2AD 1A          >        ld a, (de)
+326   B2AE B6          >        or (hl)
+327   B2AF 77          >        ld (hl), a
+328   B2B0 E1          >        pop hl
+329   B2B1 18 23       >        jr 1F       ; NextSnowflake
+330   B2B3             >
+331   B2B3             >2 ; ResetSnowflake
+332   B2B3             >        ResetSnowflake
+332   B2B3 AF          >        xor a
+332   B2B4 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B2B7 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B2BA             >
+332   B2BA CD DA B7    >        call rnd
+332   B2BD DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B2C0 CD DA B7    >        call rnd
+332   B2C3 E6 0F       >        and $0f
+332   B2C5 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B2C8             >
+332   B2C8 CD DA B7    >        call rnd
+332   B2CB DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B2CE             >
+332   B2CE CD DA B7    >        call rnd
+332   B2D1 F6 20       >        or $20
+332   B2D3 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B2D6             >1 ; NextSnowflake
+334   B2D6             >        AdvanceToNextSnowflake
+334   B2D6             >        if (1)  ; compresses better
+334   B2D6 DD 23       >            inc ix
+334   B2D8 DD 23       >            inc ix
+334   B2DA DD 23       >            inc ix
+334   B2DC DD 23       >            inc ix
+334   B2DE DD 23       >            inc ix
+334   B2E0 DD 23       >            inc ix
+334   B2E2             >        else
+334   B2E2 ~           >            ld de, 6
+334   B2E2 ~           >            add ix, de
+334   B2E2             >        endif
+282   B2E2             >        ; Ypos: +0, +1
+283   B2E2             >        ; Yspeed: +2, +3
+284   B2E2             >        ; Xpos: +4, +5
+285   B2E2 78          >        ld a, b
+286   B2E3 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B2E6 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B2E9 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B2EC DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B2EF CB 78       >        bit 7, b
+291   B2F1 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B2F3 CE 00       >        adc 0
+293   B2F5 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B2F7             >3 ; TurnSnowflakeLeft
+295   B2F7 DE 00       >        sbc 0
+296   B2F9             >4 ; ContinueSnowFlakeUpdate
+297   B2F9 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B2FC             >
+299   B2FC DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B2FF DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B302 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B305 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B308 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B30B DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B30E             >
+306   B30E D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B310 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B312             >
+309   B312             >        ; check if we need to reset this snowflake
+310   B312 FE 40       >        cp 64
+311   B314 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B316             >
+313   B316             >        ; plot it!
+314   B316 57          >        ld d, a
+315   B317 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B31A 5F          >        ld e, a
+317   B31B CB 3B       >        srl e
+318   B31D CB 3B       >        srl e
+319   B31F CB 3B       >        srl e
+320   B321 E6 07       >        and $07
+321   B323 E5          >        push hl
+322   B324 19          >        add hl, de
+323   B325 5F          >        ld e, a
+324   B326 16 B8       >        ld d, high PointTable
+325   B328 1A          >        ld a, (de)
+326   B329 B6          >        or (hl)
+327   B32A 77          >        ld (hl), a
+328   B32B E1          >        pop hl
+329   B32C 18 23       >        jr 1F       ; NextSnowflake
+330   B32E             >
+331   B32E             >2 ; ResetSnowflake
+332   B32E             >        ResetSnowflake
+332   B32E AF          >        xor a
+332   B32F DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B332 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B335             >
+332   B335 CD DA B7    >        call rnd
+332   B338 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B33B CD DA B7    >        call rnd
+332   B33E E6 0F       >        and $0f
+332   B340 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B343             >
+332   B343 CD DA B7    >        call rnd
+332   B346 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B349             >
+332   B349 CD DA B7    >        call rnd
+332   B34C F6 20       >        or $20
+332   B34E DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B351             >1 ; NextSnowflake
+334   B351             >        AdvanceToNextSnowflake
+334   B351             >        if (1)  ; compresses better
+334   B351 DD 23       >            inc ix
+334   B353 DD 23       >            inc ix
+334   B355 DD 23       >            inc ix
+334   B357 DD 23       >            inc ix
+334   B359 DD 23       >            inc ix
+334   B35B DD 23       >            inc ix
+334   B35D             >        else
+334   B35D ~           >            ld de, 6
+334   B35D ~           >            add ix, de
+334   B35D             >        endif
+282   B35D             >        ; Ypos: +0, +1
+283   B35D             >        ; Yspeed: +2, +3
+284   B35D             >        ; Xpos: +4, +5
+285   B35D 78          >        ld a, b
+286   B35E DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B361 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B364 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B367 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B36A CB 78       >        bit 7, b
+291   B36C 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B36E CE 00       >        adc 0
+293   B370 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B372             >3 ; TurnSnowflakeLeft
+295   B372 DE 00       >        sbc 0
+296   B374             >4 ; ContinueSnowFlakeUpdate
+297   B374 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B377             >
+299   B377 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B37A DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B37D DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B380 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B383 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B386 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B389             >
+306   B389 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B38B 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B38D             >
+309   B38D             >        ; check if we need to reset this snowflake
+310   B38D FE 40       >        cp 64
+311   B38F 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B391             >
+313   B391             >        ; plot it!
+314   B391 57          >        ld d, a
+315   B392 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B395 5F          >        ld e, a
+317   B396 CB 3B       >        srl e
+318   B398 CB 3B       >        srl e
+319   B39A CB 3B       >        srl e
+320   B39C E6 07       >        and $07
+321   B39E E5          >        push hl
+322   B39F 19          >        add hl, de
+323   B3A0 5F          >        ld e, a
+324   B3A1 16 B8       >        ld d, high PointTable
+325   B3A3 1A          >        ld a, (de)
+326   B3A4 B6          >        or (hl)
+327   B3A5 77          >        ld (hl), a
+328   B3A6 E1          >        pop hl
+329   B3A7 18 23       >        jr 1F       ; NextSnowflake
+330   B3A9             >
+331   B3A9             >2 ; ResetSnowflake
+332   B3A9             >        ResetSnowflake
+332   B3A9 AF          >        xor a
+332   B3AA DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B3AD DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B3B0             >
+332   B3B0 CD DA B7    >        call rnd
+332   B3B3 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B3B6 CD DA B7    >        call rnd
+332   B3B9 E6 0F       >        and $0f
+332   B3BB DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B3BE             >
+332   B3BE CD DA B7    >        call rnd
+332   B3C1 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B3C4             >
+332   B3C4 CD DA B7    >        call rnd
+332   B3C7 F6 20       >        or $20
+332   B3C9 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B3CC             >1 ; NextSnowflake
+334   B3CC             >        AdvanceToNextSnowflake
+334   B3CC             >        if (1)  ; compresses better
+334   B3CC DD 23       >            inc ix
+334   B3CE DD 23       >            inc ix
+334   B3D0 DD 23       >            inc ix
+334   B3D2 DD 23       >            inc ix
+334   B3D4 DD 23       >            inc ix
+334   B3D6 DD 23       >            inc ix
+334   B3D8             >        else
+334   B3D8 ~           >            ld de, 6
+334   B3D8 ~           >            add ix, de
+334   B3D8             >        endif
+282   B3D8             >        ; Ypos: +0, +1
+283   B3D8             >        ; Yspeed: +2, +3
+284   B3D8             >        ; Xpos: +4, +5
+285   B3D8 78          >        ld a, b
+286   B3D9 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B3DC DD 86 04    >        add (ix + Snowflake.XPos)
+288   B3DF DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B3E2 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B3E5 CB 78       >        bit 7, b
+291   B3E7 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B3E9 CE 00       >        adc 0
+293   B3EB 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B3ED             >3 ; TurnSnowflakeLeft
+295   B3ED DE 00       >        sbc 0
+296   B3EF             >4 ; ContinueSnowFlakeUpdate
+297   B3EF DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B3F2             >
+299   B3F2 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B3F5 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B3F8 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B3FB DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B3FE DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B401 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B404             >
+306   B404 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B406 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B408             >
+309   B408             >        ; check if we need to reset this snowflake
+310   B408 FE 40       >        cp 64
+311   B40A 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B40C             >
+313   B40C             >        ; plot it!
+314   B40C 57          >        ld d, a
+315   B40D DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B410 5F          >        ld e, a
+317   B411 CB 3B       >        srl e
+318   B413 CB 3B       >        srl e
+319   B415 CB 3B       >        srl e
+320   B417 E6 07       >        and $07
+321   B419 E5          >        push hl
+322   B41A 19          >        add hl, de
+323   B41B 5F          >        ld e, a
+324   B41C 16 B8       >        ld d, high PointTable
+325   B41E 1A          >        ld a, (de)
+326   B41F B6          >        or (hl)
+327   B420 77          >        ld (hl), a
+328   B421 E1          >        pop hl
+329   B422 18 23       >        jr 1F       ; NextSnowflake
+330   B424             >
+331   B424             >2 ; ResetSnowflake
+332   B424             >        ResetSnowflake
+332   B424 AF          >        xor a
+332   B425 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B428 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B42B             >
+332   B42B CD DA B7    >        call rnd
+332   B42E DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B431 CD DA B7    >        call rnd
+332   B434 E6 0F       >        and $0f
+332   B436 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B439             >
+332   B439 CD DA B7    >        call rnd
+332   B43C DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B43F             >
+332   B43F CD DA B7    >        call rnd
+332   B442 F6 20       >        or $20
+332   B444 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B447             >1 ; NextSnowflake
+334   B447             >        AdvanceToNextSnowflake
+334   B447             >        if (1)  ; compresses better
+334   B447 DD 23       >            inc ix
+334   B449 DD 23       >            inc ix
+334   B44B DD 23       >            inc ix
+334   B44D DD 23       >            inc ix
+334   B44F DD 23       >            inc ix
+334   B451 DD 23       >            inc ix
+334   B453             >        else
+334   B453 ~           >            ld de, 6
+334   B453 ~           >            add ix, de
+334   B453             >        endif
+282   B453             >        ; Ypos: +0, +1
+283   B453             >        ; Yspeed: +2, +3
+284   B453             >        ; Xpos: +4, +5
+285   B453 78          >        ld a, b
+286   B454 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B457 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B45A DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B45D DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B460 CB 78       >        bit 7, b
+291   B462 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B464 CE 00       >        adc 0
+293   B466 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B468             >3 ; TurnSnowflakeLeft
+295   B468 DE 00       >        sbc 0
+296   B46A             >4 ; ContinueSnowFlakeUpdate
+297   B46A DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B46D             >
+299   B46D DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B470 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B473 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B476 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B479 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B47C DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B47F             >
+306   B47F D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B481 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B483             >
+309   B483             >        ; check if we need to reset this snowflake
+310   B483 FE 40       >        cp 64
+311   B485 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B487             >
+313   B487             >        ; plot it!
+314   B487 57          >        ld d, a
+315   B488 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B48B 5F          >        ld e, a
+317   B48C CB 3B       >        srl e
+318   B48E CB 3B       >        srl e
+319   B490 CB 3B       >        srl e
+320   B492 E6 07       >        and $07
+321   B494 E5          >        push hl
+322   B495 19          >        add hl, de
+323   B496 5F          >        ld e, a
+324   B497 16 B8       >        ld d, high PointTable
+325   B499 1A          >        ld a, (de)
+326   B49A B6          >        or (hl)
+327   B49B 77          >        ld (hl), a
+328   B49C E1          >        pop hl
+329   B49D 18 23       >        jr 1F       ; NextSnowflake
+330   B49F             >
+331   B49F             >2 ; ResetSnowflake
+332   B49F             >        ResetSnowflake
+332   B49F AF          >        xor a
+332   B4A0 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B4A3 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B4A6             >
+332   B4A6 CD DA B7    >        call rnd
+332   B4A9 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B4AC CD DA B7    >        call rnd
+332   B4AF E6 0F       >        and $0f
+332   B4B1 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B4B4             >
+332   B4B4 CD DA B7    >        call rnd
+332   B4B7 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B4BA             >
+332   B4BA CD DA B7    >        call rnd
+332   B4BD F6 20       >        or $20
+332   B4BF DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B4C2             >1 ; NextSnowflake
+334   B4C2             >        AdvanceToNextSnowflake
+334   B4C2             >        if (1)  ; compresses better
+334   B4C2 DD 23       >            inc ix
+334   B4C4 DD 23       >            inc ix
+334   B4C6 DD 23       >            inc ix
+334   B4C8 DD 23       >            inc ix
+334   B4CA DD 23       >            inc ix
+334   B4CC DD 23       >            inc ix
+334   B4CE             >        else
+334   B4CE ~           >            ld de, 6
+334   B4CE ~           >            add ix, de
+334   B4CE             >        endif
+282   B4CE             >        ; Ypos: +0, +1
+283   B4CE             >        ; Yspeed: +2, +3
+284   B4CE             >        ; Xpos: +4, +5
+285   B4CE 78          >        ld a, b
+286   B4CF DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B4D2 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B4D5 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B4D8 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B4DB CB 78       >        bit 7, b
+291   B4DD 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B4DF CE 00       >        adc 0
+293   B4E1 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B4E3             >3 ; TurnSnowflakeLeft
+295   B4E3 DE 00       >        sbc 0
+296   B4E5             >4 ; ContinueSnowFlakeUpdate
+297   B4E5 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B4E8             >
+299   B4E8 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B4EB DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B4EE DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B4F1 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B4F4 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B4F7 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B4FA             >
+306   B4FA D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B4FC 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B4FE             >
+309   B4FE             >        ; check if we need to reset this snowflake
+310   B4FE FE 40       >        cp 64
+311   B500 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B502             >
+313   B502             >        ; plot it!
+314   B502 57          >        ld d, a
+315   B503 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B506 5F          >        ld e, a
+317   B507 CB 3B       >        srl e
+318   B509 CB 3B       >        srl e
+319   B50B CB 3B       >        srl e
+320   B50D E6 07       >        and $07
+321   B50F E5          >        push hl
+322   B510 19          >        add hl, de
+323   B511 5F          >        ld e, a
+324   B512 16 B8       >        ld d, high PointTable
+325   B514 1A          >        ld a, (de)
+326   B515 B6          >        or (hl)
+327   B516 77          >        ld (hl), a
+328   B517 E1          >        pop hl
+329   B518 18 23       >        jr 1F       ; NextSnowflake
+330   B51A             >
+331   B51A             >2 ; ResetSnowflake
+332   B51A             >        ResetSnowflake
+332   B51A AF          >        xor a
+332   B51B DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B51E DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B521             >
+332   B521 CD DA B7    >        call rnd
+332   B524 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B527 CD DA B7    >        call rnd
+332   B52A E6 0F       >        and $0f
+332   B52C DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B52F             >
+332   B52F CD DA B7    >        call rnd
+332   B532 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B535             >
+332   B535 CD DA B7    >        call rnd
+332   B538 F6 20       >        or $20
+332   B53A DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B53D             >1 ; NextSnowflake
+334   B53D             >        AdvanceToNextSnowflake
+334   B53D             >        if (1)  ; compresses better
+334   B53D DD 23       >            inc ix
+334   B53F DD 23       >            inc ix
+334   B541 DD 23       >            inc ix
+334   B543 DD 23       >            inc ix
+334   B545 DD 23       >            inc ix
+334   B547 DD 23       >            inc ix
+334   B549             >        else
+334   B549 ~           >            ld de, 6
+334   B549 ~           >            add ix, de
+334   B549             >        endif
+282   B549             >        ; Ypos: +0, +1
+283   B549             >        ; Yspeed: +2, +3
+284   B549             >        ; Xpos: +4, +5
+285   B549 78          >        ld a, b
+286   B54A DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B54D DD 86 04    >        add (ix + Snowflake.XPos)
+288   B550 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B553 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B556 CB 78       >        bit 7, b
+291   B558 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B55A CE 00       >        adc 0
+293   B55C 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B55E             >3 ; TurnSnowflakeLeft
+295   B55E DE 00       >        sbc 0
+296   B560             >4 ; ContinueSnowFlakeUpdate
+297   B560 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B563             >
+299   B563 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B566 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B569 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B56C DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B56F DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B572 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B575             >
+306   B575 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B577 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B579             >
+309   B579             >        ; check if we need to reset this snowflake
+310   B579 FE 40       >        cp 64
+311   B57B 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B57D             >
+313   B57D             >        ; plot it!
+314   B57D 57          >        ld d, a
+315   B57E DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B581 5F          >        ld e, a
+317   B582 CB 3B       >        srl e
+318   B584 CB 3B       >        srl e
+319   B586 CB 3B       >        srl e
+320   B588 E6 07       >        and $07
+321   B58A E5          >        push hl
+322   B58B 19          >        add hl, de
+323   B58C 5F          >        ld e, a
+324   B58D 16 B8       >        ld d, high PointTable
+325   B58F 1A          >        ld a, (de)
+326   B590 B6          >        or (hl)
+327   B591 77          >        ld (hl), a
+328   B592 E1          >        pop hl
+329   B593 18 23       >        jr 1F       ; NextSnowflake
+330   B595             >
+331   B595             >2 ; ResetSnowflake
+332   B595             >        ResetSnowflake
+332   B595 AF          >        xor a
+332   B596 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B599 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B59C             >
+332   B59C CD DA B7    >        call rnd
+332   B59F DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B5A2 CD DA B7    >        call rnd
+332   B5A5 E6 0F       >        and $0f
+332   B5A7 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B5AA             >
+332   B5AA CD DA B7    >        call rnd
+332   B5AD DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B5B0             >
+332   B5B0 CD DA B7    >        call rnd
+332   B5B3 F6 20       >        or $20
+332   B5B5 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B5B8             >1 ; NextSnowflake
+334   B5B8             >        AdvanceToNextSnowflake
+334   B5B8             >        if (1)  ; compresses better
+334   B5B8 DD 23       >            inc ix
+334   B5BA DD 23       >            inc ix
+334   B5BC DD 23       >            inc ix
+334   B5BE DD 23       >            inc ix
+334   B5C0 DD 23       >            inc ix
+334   B5C2 DD 23       >            inc ix
+334   B5C4             >        else
+334   B5C4 ~           >            ld de, 6
+334   B5C4 ~           >            add ix, de
+334   B5C4             >        endif
+282   B5C4             >        ; Ypos: +0, +1
+283   B5C4             >        ; Yspeed: +2, +3
+284   B5C4             >        ; Xpos: +4, +5
+285   B5C4 78          >        ld a, b
+286   B5C5 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B5C8 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B5CB DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B5CE DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B5D1 CB 78       >        bit 7, b
+291   B5D3 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B5D5 CE 00       >        adc 0
+293   B5D7 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B5D9             >3 ; TurnSnowflakeLeft
+295   B5D9 DE 00       >        sbc 0
+296   B5DB             >4 ; ContinueSnowFlakeUpdate
+297   B5DB DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B5DE             >
+299   B5DE DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B5E1 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B5E4 DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B5E7 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B5EA DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B5ED DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B5F0             >
+306   B5F0 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B5F2 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B5F4             >
+309   B5F4             >        ; check if we need to reset this snowflake
+310   B5F4 FE 40       >        cp 64
+311   B5F6 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B5F8             >
+313   B5F8             >        ; plot it!
+314   B5F8 57          >        ld d, a
+315   B5F9 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B5FC 5F          >        ld e, a
+317   B5FD CB 3B       >        srl e
+318   B5FF CB 3B       >        srl e
+319   B601 CB 3B       >        srl e
+320   B603 E6 07       >        and $07
+321   B605 E5          >        push hl
+322   B606 19          >        add hl, de
+323   B607 5F          >        ld e, a
+324   B608 16 B8       >        ld d, high PointTable
+325   B60A 1A          >        ld a, (de)
+326   B60B B6          >        or (hl)
+327   B60C 77          >        ld (hl), a
+328   B60D E1          >        pop hl
+329   B60E 18 23       >        jr 1F       ; NextSnowflake
+330   B610             >
+331   B610             >2 ; ResetSnowflake
+332   B610             >        ResetSnowflake
+332   B610 AF          >        xor a
+332   B611 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B614 DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B617             >
+332   B617 CD DA B7    >        call rnd
+332   B61A DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B61D CD DA B7    >        call rnd
+332   B620 E6 0F       >        and $0f
+332   B622 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B625             >
+332   B625 CD DA B7    >        call rnd
+332   B628 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B62B             >
+332   B62B CD DA B7    >        call rnd
+332   B62E F6 20       >        or $20
+332   B630 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B633             >1 ; NextSnowflake
+334   B633             >        AdvanceToNextSnowflake
+334   B633             >        if (1)  ; compresses better
+334   B633 DD 23       >            inc ix
+334   B635 DD 23       >            inc ix
+334   B637 DD 23       >            inc ix
+334   B639 DD 23       >            inc ix
+334   B63B DD 23       >            inc ix
+334   B63D DD 23       >            inc ix
+334   B63F             >        else
+334   B63F ~           >            ld de, 6
+334   B63F ~           >            add ix, de
+334   B63F             >        endif
+282   B63F             >        ; Ypos: +0, +1
+283   B63F             >        ; Yspeed: +2, +3
+284   B63F             >        ; Xpos: +4, +5
+285   B63F 78          >        ld a, b
+286   B640 DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B643 DD 86 04    >        add (ix + Snowflake.XPos)
+288   B646 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B649 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B64C CB 78       >        bit 7, b
+291   B64E 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B650 CE 00       >        adc 0
+293   B652 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B654             >3 ; TurnSnowflakeLeft
+295   B654 DE 00       >        sbc 0
+296   B656             >4 ; ContinueSnowFlakeUpdate
+297   B656 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B659             >
+299   B659 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B65C DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B65F DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B662 DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B665 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B668 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B66B             >
+306   B66B D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B66D 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B66F             >
+309   B66F             >        ; check if we need to reset this snowflake
+310   B66F FE 40       >        cp 64
+311   B671 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B673             >
+313   B673             >        ; plot it!
+314   B673 57          >        ld d, a
+315   B674 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B677 5F          >        ld e, a
+317   B678 CB 3B       >        srl e
+318   B67A CB 3B       >        srl e
+319   B67C CB 3B       >        srl e
+320   B67E E6 07       >        and $07
+321   B680 E5          >        push hl
+322   B681 19          >        add hl, de
+323   B682 5F          >        ld e, a
+324   B683 16 B8       >        ld d, high PointTable
+325   B685 1A          >        ld a, (de)
+326   B686 B6          >        or (hl)
+327   B687 77          >        ld (hl), a
+328   B688 E1          >        pop hl
+329   B689 18 23       >        jr 1F       ; NextSnowflake
+330   B68B             >
+331   B68B             >2 ; ResetSnowflake
+332   B68B             >        ResetSnowflake
+332   B68B AF          >        xor a
+332   B68C DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B68F DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B692             >
+332   B692 CD DA B7    >        call rnd
+332   B695 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B698 CD DA B7    >        call rnd
+332   B69B E6 0F       >        and $0f
+332   B69D DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B6A0             >
+332   B6A0 CD DA B7    >        call rnd
+332   B6A3 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B6A6             >
+332   B6A6 CD DA B7    >        call rnd
+332   B6A9 F6 20       >        or $20
+332   B6AB DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B6AE             >1 ; NextSnowflake
+334   B6AE             >        AdvanceToNextSnowflake
+334   B6AE             >        if (1)  ; compresses better
+334   B6AE DD 23       >            inc ix
+334   B6B0 DD 23       >            inc ix
+334   B6B2 DD 23       >            inc ix
+334   B6B4 DD 23       >            inc ix
+334   B6B6 DD 23       >            inc ix
+334   B6B8 DD 23       >            inc ix
+334   B6BA             >        else
+334   B6BA ~           >            ld de, 6
+334   B6BA ~           >            add ix, de
+334   B6BA             >        endif
+282   B6BA             >        ; Ypos: +0, +1
+283   B6BA             >        ; Yspeed: +2, +3
+284   B6BA             >        ; Xpos: +4, +5
+285   B6BA 78          >        ld a, b
+286   B6BB DD A6 02    >        and (ix + Snowflake.YSpeed)
+287   B6BE DD 86 04    >        add (ix + Snowflake.XPos)
+288   B6C1 DD 77 04    >        ld (ix + Snowflake.XPos), a
+289   B6C4 DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+290   B6C7 CB 78       >        bit 7, b
+291   B6C9 20 04       >        jr nz, 3F ; TurnSnowflakeLeft
+292   B6CB CE 00       >        adc 0
+293   B6CD 18 02       >        jr 4F ; ContinueSnowFlakeUpdate
+294   B6CF             >3 ; TurnSnowflakeLeft
+295   B6CF DE 00       >        sbc 0
+296   B6D1             >4 ; ContinueSnowFlakeUpdate
+297   B6D1 DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+298   B6D4             >
+299   B6D4 DD 7E 00    >        ld a, (ix + Snowflake.YPos)
+300   B6D7 DD 86 02    >        add (ix + Snowflake.YSpeed)
+301   B6DA DD 77 00    >        ld (ix + Snowflake.YPos), a
+302   B6DD DD 7E 01    >        ld a, (ix + Snowflake.YPos + 1)
+303   B6E0 DD 8E 03    >        adc (ix + Snowflake.YSpeed + 1)
+304   B6E3 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+305   B6E6             >
+306   B6E6 D6 10       >        sub 16      ; we leave the first 16 pixels above the screen
+307   B6E8 38 3F       >        jr c, 1F    ; NextSnowflake
+308   B6EA             >
+309   B6EA             >        ; check if we need to reset this snowflake
+310   B6EA FE 40       >        cp 64
+311   B6EC 30 18       >        jr nc, 2F   ; ResetSnowflake
+312   B6EE             >
+313   B6EE             >        ; plot it!
+314   B6EE 57          >        ld d, a
+315   B6EF DD 7E 05    >        ld a, (ix + Snowflake.XPos + 1)
+316   B6F2 5F          >        ld e, a
+317   B6F3 CB 3B       >        srl e
+318   B6F5 CB 3B       >        srl e
+319   B6F7 CB 3B       >        srl e
+320   B6F9 E6 07       >        and $07
+321   B6FB E5          >        push hl
+322   B6FC 19          >        add hl, de
+323   B6FD 5F          >        ld e, a
+324   B6FE 16 B8       >        ld d, high PointTable
+325   B700 1A          >        ld a, (de)
+326   B701 B6          >        or (hl)
+327   B702 77          >        ld (hl), a
+328   B703 E1          >        pop hl
+329   B704 18 23       >        jr 1F       ; NextSnowflake
+330   B706             >
+331   B706             >2 ; ResetSnowflake
+332   B706             >        ResetSnowflake
+332   B706 AF          >        xor a
+332   B707 DD 77 04    >        ld (ix + Snowflake.XPos), a
+332   B70A DD 77 03    >        ld (ix + Snowflake.YSpeed + 1), a
+332   B70D             >
+332   B70D CD DA B7    >        call rnd
+332   B710 DD 77 00    >        ld (ix + Snowflake.YPos), a
+332   B713 CD DA B7    >        call rnd
+332   B716 E6 0F       >        and $0f
+332   B718 DD 77 01    >        ld (ix + Snowflake.YPos + 1), a
+332   B71B             >
+332   B71B CD DA B7    >        call rnd
+332   B71E DD 77 05    >        ld (ix + Snowflake.XPos + 1), a
+332   B721             >
+332   B721 CD DA B7    >        call rnd
+332   B724 F6 20       >        or $20
+332   B726 DD 77 02    >        ld (ix + Snowflake.YSpeed), a
+333   B729             >1 ; NextSnowflake
+334   B729             >        AdvanceToNextSnowflake
+334   B729             >        if (1)  ; compresses better
+334   B729 DD 23       >            inc ix
+334   B72B DD 23       >            inc ix
+334   B72D DD 23       >            inc ix
+334   B72F DD 23       >            inc ix
+334   B731 DD 23       >            inc ix
+334   B733 DD 23       >            inc ix
+334   B735             >        else
+334   B735 ~           >            ld de, 6
+334   B735 ~           >            add ix, de
+334   B735             >        endif
+335   B735                  EDUP
+336   B735
+337   B735                  ; blit the current buffer
+338   B735 01 00 3F         ld bc, #3f00
+339   B738              BufferAddrChangeOp:
+340   B738 08               ex af, af'  ;   xoring this opcode with 1 yields add hl, bc
+341   B739 04               inc b
+342   B73A
+343   B73A                  ; vary the starting scanline to cover the whole screen
+344   B73A              StartingScanline equ $+1
+345   B73A 3E 00            ld a, 0
+346   B73C 3C               inc a
+347   B73D FE 03            cp 3
+348   B73F 38 01            jr c, StartingScanlineReady
+349   B741 AF               xor a
+350   B742              StartingScanlineReady
+351   B742 32 3B B7         ld (StartingScanline), a
+352   B745 80               add b
+353   B746 57               ld d, a
+354   B747 59               ld e, c
+355   B748
+356   B748 06 40            ld b, 64
+357   B74A              BlitYLoop:
+358   B74A D5                   push de
+359   B74B E5                   push hl
+360   B74C 0E 33                ld c, #33
+361   B74E                      DUP 32
+362   B74E ED A0       >            ldi
+362   B750 ED A0       >            ldi
+362   B752 ED A0       >            ldi
+362   B754 ED A0       >            ldi
+362   B756 ED A0       >            ldi
+362   B758 ED A0       >            ldi
+362   B75A ED A0       >            ldi
+362   B75C ED A0       >            ldi
+362   B75E ED A0       >            ldi
+362   B760 ED A0       >            ldi
+362   B762 ED A0       >            ldi
+362   B764 ED A0       >            ldi
+362   B766 ED A0       >            ldi
+362   B768 ED A0       >            ldi
+362   B76A ED A0       >            ldi
+362   B76C ED A0       >            ldi
+362   B76E ED A0       >            ldi
+362   B770 ED A0       >            ldi
+362   B772 ED A0       >            ldi
+362   B774 ED A0       >            ldi
+362   B776 ED A0       >            ldi
+362   B778 ED A0       >            ldi
+362   B77A ED A0       >            ldi
+362   B77C ED A0       >            ldi
+362   B77E ED A0       >            ldi
+362   B780 ED A0       >            ldi
+362   B782 ED A0       >            ldi
+362   B784 ED A0       >            ldi
+362   B786 ED A0       >            ldi
+362   B788 ED A0       >            ldi
+362   B78A ED A0       >            ldi
+362   B78C ED A0       >            ldi
+363   B78E                      EDUP
+364   B78E E1                   pop hl
+365   B78F              BufferScanlineOp:
+366   B78F 24                   inc h
+367   B790 D1                   pop de
+368   B791                      NextScanline d, e
+368   B791 7A          >        ld a, d
+368   B792 E6 07       >        and $07
+368   B794 FE 07       >        cp $07
+368   B796 28 03       >        jr z, .ChangeOfLine
+368   B798 14          >        inc d
+368   B799 18 0C       >        jr .Done
+368   B79B             >.ChangeOfLine
+368   B79B 7B          >        ld a, e
+368   B79C C6 20       >        add $20
+368   B79E 5F          >        ld e, a
+368   B79F 7A          >        ld a, d
+368   B7A0 30 02       >        jr nc, .NoScreenThirdChange
+368   B7A2 C6 08       >        add $08
+368   B7A4             >.NoScreenThirdChange
+368   B7A4 E6 F8       >        and $f8
+368   B7A6 57          >        ld d, a
+368   B7A7             >.Done
+369   B7A7                      NextScanline d, e
+369   B7A7 7A          >        ld a, d
+369   B7A8 E6 07       >        and $07
+369   B7AA FE 07       >        cp $07
+369   B7AC 28 03       >        jr z, .ChangeOfLine
+369   B7AE 14          >        inc d
+369   B7AF 18 0C       >        jr .Done
+369   B7B1             >.ChangeOfLine
+369   B7B1 7B          >        ld a, e
+369   B7B2 C6 20       >        add $20
+369   B7B4 5F          >        ld e, a
+369   B7B5 7A          >        ld a, d
+369   B7B6 30 02       >        jr nc, .NoScreenThirdChange
+369   B7B8 C6 08       >        add $08
+369   B7BA             >.NoScreenThirdChange
+369   B7BA E6 F8       >        and $f8
+369   B7BC 57          >        ld d, a
+369   B7BD             >.Done
+370   B7BD                      NextScanline d, e
+370   B7BD 7A          >        ld a, d
+370   B7BE E6 07       >        and $07
+370   B7C0 FE 07       >        cp $07
+370   B7C2 28 03       >        jr z, .ChangeOfLine
+370   B7C4 14          >        inc d
+370   B7C5 18 0C       >        jr .Done
+370   B7C7             >.ChangeOfLine
+370   B7C7 7B          >        ld a, e
+370   B7C8 C6 20       >        add $20
+370   B7CA 5F          >        ld e, a
+370   B7CB 7A          >        ld a, d
+370   B7CC 30 02       >        jr nc, .NoScreenThirdChange
+370   B7CE C6 08       >        add $08
+370   B7D0             >.NoScreenThirdChange
+370   B7D0 E6 F8       >        and $f8
+370   B7D2 57          >        ld d, a
+370   B7D3             >.Done
+371   B7D3 05               dec b
+372   B7D4 C2 4A B7         jp nz, BlitYLoop
+373   B7D7
+374   B7D7                  ; ---------------
+375   B7D7                  ; end of main loop
+376   B7D7                  if (PROFILE_FRAME)
+377   B7D7 ~                    xor a
+378   B7D7 ~                    out (#fe), a
+379   B7D7                  endif
+380   B7D7
+381   B7D7 C3 A5 AB         jp main_loop
+382   B7DA
+383   B7DA              ; ---------------------------------------------------
+384   B7DA              ; Classic ZX Spectrum "Error" sound, for running in 48k (no memory for this alas)
+385   B7DA              ;Rasp:
+386   B7DA              ;   ld hl, $1A90
+387   B7DA              ;   ld de, $0040
+388   B7DA              ;   jp #03B5
+389   B7DA
+390   B7DA              ; ---------------------------------------------------
+391   B7DA              ; Xorshift algo by raxoft (Patrik Rak), from https://gist.github.com/raxoft/c074743ea3f926db0037
+392   B7DA
+393   B7DA              rnd:
+394   B7DA D9                   exx
+395   B7DB 21 02 68             ld  hl, MusicRegs - 1 ; 0xA280   ; yw -> zt
+396   B7DE 11 43 6D             ld  de, MusicRegs + RegisterFileLength ;0xC0DE   ; xz -> yw
+397   B7E1 22 DF B7             ld  (rnd+5),hl  ; x = y, z = w
+398   B7E4 7D                   ld  a,l         ; w = w ^ ( w << 3 )
+399   B7E5 87                   add a,a
+400   B7E6 87                   add a,a
+401   B7E7 87                   add a,a
+402   B7E8 AD                   xor l
+403   B7E9 6F                   ld  l,a
+404   B7EA 7A                   ld  a,d         ; t = x ^ (x << 1)
+405   B7EB 87                   add a,a
+406   B7EC AA                   xor d
+407   B7ED 67                   ld  h,a
+408   B7EE 1F                   rra             ; t = t ^ (t >> 1) ^ w
+409   B7EF AC                   xor h
+410   B7F0 AD                   xor l
+411   B7F1 63                   ld  h,e         ; y = z
+412   B7F2 6F                   ld  l,a         ; w = t
+413   B7F3 22 DC B7             ld  (rnd+2),hl
+414   B7F6 D9                   exx
+415   B7F7 C9                   ret
+416   B7F8
+417   B7F8              ; ---------------------------------------------------
+418   B7F8              ; Resources
+419   B7F8
+420   B7F8 00 00 00...      align 256
+421   B800              PointTable:
+422   B800 80               db %10000000
+423   B801 40               db %01000000
+424   B802 20               db %00100000
+425   B803 10               db %00010000
+426   B804 08               db %00001000
+427   B805 04               db %00000100
+428   B806 02               db %00000010
+429   B807 01               db %00000001
+430   B808
+431   B808 00 00 00...      align 256
+432   B900              BufferPages:
+433   B900                  ; #10 should be the last value or the 48k test will fail
+434   B900 11 13 14 16      db #11, #13, #14, #16, #17, #10
+434   B904 17 10
+435   B906                  ASSERT $-BufferPages == NUM_BUFFER_PAGES
+436   B906
+437   B906 00 00 00...      align 256
+438   BA00              SnowflakesBuffer:
+439   BA00 00 00 00...      block NUM_SNOWFLAKES * Snowflake
+440   BA7E
+441   BA7E              PrevRegs:
+442   BA7E 00 00 00...      block 16
+443   BA8E
+444   BA8E              SnowflakesBufferSize equ $ - SnowflakesBuffer
+445   BA8E
+446   BA8E                  ; we should not allow the main program to overflow since $c000-$ffff is used for the buffers
+447   BA8E                  ASSERT $ < 49152
+448   BA8E
+449   BA8E                  org $c000
+450   C000 01               db 1            ; needed for the 48K / 128K test
+451   C001
+452   C001                  savebin "snownonono_main.bin", savebin_begin, $-savebin_begin
+453   C001                  SAVESNA "snownonono_main.sna", #6800
+454   C001
+# file closed: ..\code\main.asm
