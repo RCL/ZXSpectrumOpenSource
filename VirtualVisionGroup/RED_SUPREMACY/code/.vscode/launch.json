@@ -1,0 +1,58 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"type": "dezog",
+			"request": "launch",
+			"name": "CSpect",
+			"remoteType": "cspect",
+			"sjasmplus": [
+				{
+					"path": "main.sld.txt"
+				}
+			],
+			"commandsAfterLaunch": [],
+			"history": {
+				"reverseDebugInstructionCount": 1000000,
+				"spotCount": 10,
+				"codeCoverageEnabled": false
+			},
+			"startAutomatically": false,
+			"rootFolder": "${workspaceFolder}",
+			"load": "../output/sup_main.nex",
+			"topOfStack": "savebin_begin"
+		},
+		{
+            "type": "dezog",
+            "request": "launch",
+            "name": "CSpect_RE",
+            "remoteType": "cspect",
+            "startAutomatically": false,
+            "revEng": [
+                {
+                    "path": "dezog_re.list"
+                }
+            ],
+            "rootFolder": "${workspaceFolder}"
+        }
+		{
+			"name": "Launch Extension",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				//"--disable-extensions",
+				"--extensionDevelopmentPath=${workspaceFolder}"
+			],
+			"debugWebviews": true,
+			"sourceMaps": true,
+			"outFiles": [
+				"${workspaceFolder}/out/**/*.js"
+			],
+			"preLaunchTask": "watch",
+			"skipFiles": [
+				"**/extensionHostProcess.js"
+			]
+		}
+	]
+}
