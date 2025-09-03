@@ -15,38 +15,6 @@
                          #&@@@@% %#&@@@# 2o25  .#@@@@@@@@@@@@@@@@@@@#       
                           ''''''  '''''          ''''''''''''''''''' 
 
-  _____________      _____________ ___________________________________
-    ____/______\__________________/________________________ \          ______
-             //   ________________________/                 ____________/
-         ___//                                                   \
-        //\                                      #           \    \
-       ||  \        #####  ##########    ################     \   | __________
-       ||   |         ##     #    #         ##       #         |  |/
-       ||   |       ##       #    #         ##       #         |  |
-            |     #######    #    #      #################     |  |
-            |       #  ##    #    #                            | //
-       _____|       #  ##  ##########       ##########         ||
-  _______/  |       #  ##    #    #         ##       #         ||
-      \     |       #  ##    #    #         ##########         ||
-       \____|       #####    #    #         ##       #         |/
-   _______/ |              ###    #         ##########         |
-            |               #                                  |
-             \              #                                  |
-              |     #################    #################    /         ______
-              |        ##     ##           ##    #   ###     |  _______/___
-              |        ##     ##  #          ##  # ###       |         ___/
-              |       ###     #####           ######         |    ________\___
-              |                                 ###          |   /_____/___
-              |     #############             ##  ###        |__/___
-   __________/|        ##       ##          ###     ###      |
-     \_______\|        ##       #+ -#     ###         ###    |
-              |       ###       #####    ##             #    |
-  ___________/|                                              |
-              |  _____________________________________________/______________
-               \_______________/                           \
-
-              . .. ... O..T..O..M..A..T..A.  .L..A..B..S ... .. .
-
 -------- ------ ----- ---- --- -- - - -- --- ---- ----- ------ ------- --------
 
              Anaglyph 1k intro - a contribution to Xenium 2025
@@ -106,8 +74,8 @@ not the most optimal, but readily available fixed point math routines have been
 reused from RTZX series of prods by VVG.
 
    Music is straight from VortexTracker, and is stored as a register dump in
-a more compressible format. It is written for the mono audio output of the ori-
-ginal Speccy (+2 grey in particular), so we recommend listening to it in mono.
+a more compressible format. It is written for the mono audio output of the 
+original Speccy (+2 grey in particular), so we recommend listening to it in mono.
 Kudos to Pator for being able to accommodate the last minute changes needed to
 get everything under the 1k budget.
 
