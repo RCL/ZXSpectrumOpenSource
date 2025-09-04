@@ -1,0 +1,1 @@
+F: 768 Group00: 48 Group01: 232 Group02: 576 Group03: 4 Group04: 1 Group05: 256 Group06: 0 Group07: 0
