@@ -1,0 +1,29 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "SjASMPlus",
+            "type": "shell",
+            "command": "${workspaceFolder}/build_sna_unreal.bat",
+            //"command": "${workspaceFolder}/build_sna_unreal_ts.bat",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "args": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "isBackground": false,
+            "presentation": {
+                "echo": false,
+                "reveal": "always",
+                "focus": true,
+                "panel": "shared",
+                "showReuseMessage": false,
+                "clear": true
+            },
+            "problemMatcher": "$errmatcher-sjasmplus"
+        }
+    ]
+}

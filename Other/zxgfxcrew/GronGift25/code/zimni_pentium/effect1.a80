@@ -1,0 +1,63 @@
+						module	effect1
+render
+/*************************FLAME**************************/
+							ld	hl,@BUFFER_START+(BUFFER_HEIGHT)*256+2
+							ld	b,BUFFER_WIDTH-4
+fuel_loop
+							ld	a,(BUFFER_CALCULATION3)
+							rra
+							jr	nc,fuel_no_xor
+							xor	#B8							
+fuel_no_xor
+							ld	(BUFFER_CALCULATION3),a
+
+							and	%00111111
+							ld	(hl),a
+							inc	l
+							djnz	fuel_loop
+/************************ BLUR ***************************/
+							ld	hl,@BUFFER_START
+							ld	c,@BUFFER_HEIGHT
+
+row
+						dup	BUFFER_WIDTH+1
+						
+							inc	h              ; y+1
+							ld	a,(hl)         ; a = (x,y+1)
+
+							inc	l              ; x+1, y+1
+							add	(hl)
+
+							dec	l
+							dec	l              ; x-1, y+1
+							add	(hl)
+
+							inc	l              ; back to x, y+1
+							inc	h              ; y+2
+							add	(hl)           ; + (x, y+2)
+
+							dec	h              ; back to y+1
+							dec	h              ; back to y							
+
+							srl	a
+							srl	a						
+
+							or	a
+							jr	z,1_F
+							dec a
+1:
+							ld	(hl),a
+
+
+							inc	l
+						edup
+							inc	h
+							ld	l,0
+
+							dec	c
+							jp	nz,row
+
+							ret
+BUFFER_CALCULATION3
+							db	#ff
+						endmodule

@@ -1,0 +1,7 @@
+							device	ZXSPECTRUM128
+
+							include	"code.a80"
+							;savesna	"compile.sna",SNATest
+							DISPLAY START
+							DISPLAY CODE_END
+							savebin	"binary.C",START,CODE_END-START

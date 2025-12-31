@@ -1,0 +1,74 @@
+
+; In:
+;   HL = diff data
+;   E = line number
+;   A = x offset
+move_32_upper_v2:
+	ld ixl, a
+
+        ld d, high scr_addr_table       ; DE = ptr to table
+
+        ld (.saved_sp), sp
+        di
+        ld sp, hl                       ; SP = diff data
+
+        ex de, hl                       ; HL = ptr to table
+
+;
+; top diff
+;
+        DUP 5
+        ld d, (hl)                      ; read screen address from table
+        inc h
+        ld a, (hl)
+        dec h
+	add ixl				; xoff1
+        ld e, a                         ; DE = target screen addr
+
+        pop bc
+        ld a, (de) : xor c : ld (de), a : inc e
+        ld a, (de) : xor b : ld (de), a : inc e
+        pop bc
+        ld a, (de) : xor c : ld (de), a : inc e
+        ld a, (de) : xor b : ld (de), a
+
+        inc l                           ; next line
+	EDUP
+
+;
+; side diffs
+;
+        DUP 5
+        ld d, (hl)                      ; read screen address from table
+        inc h
+        ld a, (hl)
+	add ixl				; xoff2
+        ld e, a                         ; DE = target screen addr
+
+        pop bc
+        ld a, (de) : xor c : ld (de), a
+        inc e : inc e : inc e
+        ld a, (de) : xor b : ld (de), a
+
+        inc l                           ; next line
+
+        ld a, (hl)                      ; read screen address from table
+	add ixl				; xoff2
+        ld e, a
+        dec h
+        ld d, (hl)                      ; DE = target screen addr
+
+        pop bc
+        ld a, (de) : xor c : ld (de), a
+        inc e : inc e : inc e
+        ld a, (de) : xor b : ld (de), a
+
+        inc l                           ; next line
+	EDUP
+
+.saved_sp: equ $+1
+        ld sp, 0
+        ei
+        ret
+
+

@@ -1,0 +1,102 @@
+START						equ	#8000
+
+BUFFER_WIDTH_MULTIPLIER		equ	8
+BUFFER_WIDTH				equ	(BUFFER_WIDTH_MULTIPLIER+1)*4
+BUFFER_HEIGHT				equ	26
+BUFFER_LENGTH				equ	BUFFER_HEIGHT*256
+
+							display	CODE_END,",",CODE_END-START
+							org	START
+							jp init
+							jp CYCLE
+
+init:
+							ld	hl,#40e5
+							ld	(CHUNKS.SCREEN_ADDRESS),hl
+
+							ld	hl,CHUNK_TABLE
+							ld	(CHUNKS.CHUNKS_TABLE),hl
+
+							ld	hl,BUFFER_START
+							ld	(CHUNKS.BUFFER_START),hl
+
+							ld	a,BUFFER_HEIGHT
+							ld	(CHUNKS.BUFFER_HEIGHT),a
+
+							ld	a,BUFFER_WIDTH_MULTIPLIER
+							ld	(CHUNKS.BUFFER_WIDTH_MULTIPLIER),a
+
+							jp	CHUNKS.INIT
+CYCLE
+							ld	a,(timer)
+							inc	a
+							ld	(timer),a
+							cp	max_timer
+							jr	nz,cycle_choose_eff
+							xor	a
+							ld	(timer),a							
+							ld	a,(effect)
+							inc	a
+							cp	max_effect+1
+							jr	nz,cycle1
+							xor	a
+cycle1
+							ld	(effect),a
+							call	clear_buff
+
+cycle_choose_eff
+							ld	a,(effect)
+							cp	1
+							jr	z,cycle_eff1
+							cp	2
+							jr	z,cycle_eff2
+cycle_eff0
+							call	effect0.render
+							jp	CHUNKS.DRAW
+cycle_eff1
+							call	effect1.render
+							jp		CHUNKS.DRAW
+cycle_eff2
+							call	effect2.render
+							jp		CHUNKS.DRAW
+clear_buff
+							ld	hl,BUFFER_START
+							ld	a,0
+							ld	(hl),a
+							ld	de,BUFFER_START+1
+							ld	bc,BUFFER_HEIGHT*256 +BUFFER_WIDTH - 1
+							ldir
+							ret
+
+timer						db	0
+effect						db	255
+max_effect					equ	2
+max_timer					equ	60
+;/-------------------------------------------------------------------------------------------/
+							include	"effect0.a80"
+							include	"effect1.a80"
+							include	"effect2.a80"
+							include	"chunks.a80"
+;/-------------------------------------------------------------------------------------------/
+;screen_start;
+;							incbin	"screen.scr"
+;screen_end
+CODE_END
+;							block 6912
+							DISPLAY "CODE_END is ", /A, CODE_END
+
+							;org	($-1)/256*256+256
+							align 256
+CHUNK_TABLE
+							block 2048
+CHUNK_TABLE_END
+
+BUFFER_START
+BUFFER_END					equ	BUFFER_START+BUFFER_LENGTH
+
+							DISPLAY "BUFFER_START is ", /A, BUFFER_START
+							DISPLAY "BUFFER_END is ", /A, BUFFER_END
+
+							assert ($ < $be00)
+							assert (BUFFER_START < $be00)
+							assert (BUFFER_END < $be00)

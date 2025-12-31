@@ -1,0 +1,385 @@
+						module	CHUNKS
+CHUNKS_TABLE				dw	#0000
+BUFFER_START				dw	#0000
+BUFFER_WIDTH_MULTIPLIER		db	15
+BUFFER_HEIGHT				db	48
+SCREEN_ADDRESS				dw	#4000
+
+INIT
+							ld	a,(BUFFER_HEIGHT)
+							ld	(DRAW3+1),a
+
+							ld	hl,(CHUNKS_TABLE)
+							ld	a,h
+							ld	(DRAW_ADDRESS_HIGH+1),a
+
+							call	INIT_CHUNKS_TABLE
+							call	INIT_DRAW_LINE
+							call	INIT_SCR_ADR_TABLE
+							call	INIT_BYTETABLE
+							ret
+;/-------------------------------------------------------------------------------------------/	
+DRAW
+							ld	hl,(BUFFER_START)
+							xor	a
+
+							ld	b,HIGH BYTETABLE
+
+DRAW2
+							ld	hx,a
+							exx
+
+							ld	b,HIGH SCR_ADR_TABLE
+
+							add	a,a
+							ld	c,a
+							ld	a,(BC)
+							ld	h,a
+							inc	bc
+							ld	a,(BC)
+							ld	l,a
+DRAW_ADDRESS_HIGH
+							ld	d,0			;placeholder for chunks table address
+
+							exx
+							call	DRAW_LINE
+
+							inc	h
+							ld	l,0
+
+							ld	a,hx
+							inc	a
+DRAW3
+							cp	0			;placeholder for buffer height
+							jr	nz,DRAW2
+							call	COLORIZE
+
+							ret
+;/-------------------------------------------------------------------------------------------/
+color_w						equ	18
+color_h						equ	13
+color_x						equ	5
+color_y						equ	7
+color_1						equ	%01000101
+color_2						equ	%01111101
+color_threshold				equ	12
+COLORIZE
+							ld	hl,(BUFFER_START)
+							ld	de,#5800+color_y*32+color_x
+							ld	c,color_h
+DRAW_ATTR_LINES
+							ld	b,color_w
+							push	hl
+DRAW_ATTRIBUTE
+							ld	a,(hl)
+							inc	h
+							add	(hl)
+							inc	l
+							add	(hl)
+							dec	h
+							add	(hl)
+							cp	color_threshold*4
+							jr	c,DRAW_ATTRIBUTE_DARK
+							ld	a,color_2
+							jr	DRAW_ATTRIBUTE2
+DRAW_ATTRIBUTE_DARK
+							ld	a,color_1
+DRAW_ATTRIBUTE2
+							ld	(de),a
+							inc	e
+							inc	l
+							djnz	DRAW_ATTRIBUTE
+
+							ld	hl,32-color_w
+							add	hl,de
+							ex	hl,de
+
+							pop	hl
+							inc	h
+							inc	h
+
+							dec	c
+							jr	nz,DRAW_ATTR_LINES
+							ret
+;/-------------------------------------------------------------------------------------------/	
+INIT_CHUNKS_TABLE
+							ld	hl,(CHUNKS_TABLE)
+INIT_CHUNKS_TABLE2
+							ld	a,l
+							and	#F0
+							rrca
+							rrca
+							ld	de,CHUNKS_DATA
+							add	a,e
+							ld	e,a
+							adc	a,d
+							sub	e
+							ld	d,a
+							ld	b,4
+INIT_CHUNKS_TABLE3
+							ld	a,(DE)
+							inc	de
+							and	#F0					
+							ld	(HL),a
+							inc	h
+							;call	check_HL_overflow		; uncomment this if you're seeing weirdness with the chunks
+							djnz	INIT_CHUNKS_TABLE3
+							ld	a,l
+							and	#0F
+							rlca
+							rlca
+							ld	de,CHUNKS_DATA+4
+							add	a,e
+							ld	e,a
+							adc	a,d
+							sub	e
+							ld	d,a
+							ld	b,4
+INIT_CHUNKS_TABLE4
+							dec	de
+							ld	a,(DE)
+							and	#0F
+							dec	h
+							or	(HL)
+							ld	(HL),a
+							djnz	INIT_CHUNKS_TABLE4
+							inc	l
+							jr	nz,INIT_CHUNKS_TABLE2
+
+check_HL_overflow:
+							push hl
+							push de
+							; check that we didn't overflow
+							ld de, CHUNK_TABLE_END
+							or a
+							sbc hl, de
+							pop de
+							pop hl
+							ret c
+
+.error
+.error_color equ $+1
+							ld a, 3
+							xor 3
+							ld (.error_color), a
+							out ($fe), a
+							jr .error
+
+CHUNKS_DATA
+						; chunk 0
+							db	%00000000
+							db	%00000000
+							db	%00000000
+							db	%00000000
+						; chunk 1
+							db	%10001000
+							db	%00000000
+							db	%00000000
+							db	%00000000
+						; chunk 2
+							db	%10001000
+							db	%00000000
+							db	%00100010
+							db	%00000000
+						; chunk 3
+							db	%10101010
+							db	%00000000
+							db	%00100010
+							db	%00000000
+						; chunk 4
+							db	%10101010
+							db	%00000000
+							db	%10101010
+							db	%00000000
+						; chunk 5
+							db	%10101010
+							db	%01000100
+							db	%10101010
+							db	%00010001
+						; chunk 6
+							db	%10101010
+							db	%01010101
+							db	%10101010
+							db	%01010101
+						; chunk 7
+							db	%10101010
+							db	%01010101
+							db	%10101010
+							db	%01110111
+						; chunk 8
+							db	%10101010
+							db	%11011101
+							db	%10101010
+							db	%11111111
+						; chunk 9
+							db	%10101010
+							db	%11111111
+							db	%10101010
+							db	%11111111
+						; chunk 10
+							db	%10101010
+							db	%11111111
+							db	%10111011
+							db	%11111111
+						; chunk 11
+							db	%11101110
+							db	%11111111
+							db	%10111011
+							db	%11111111
+						; chunk 12
+							db	%11111111
+							db	%11111111
+							db	%11111111
+							db	%11111111
+						; chunk 13
+							db	%11101110
+							db	%11111111
+							db	%10111011
+							db	%11111111
+						; chunk 14
+							db	%10101010
+							db	%11111111
+							db	%10101010
+							db	%11111111
+						; chunk 15
+							db	%10101010
+							db	%01010101
+							db	%10101010
+							db	%01010101
+;/-------------------------------------------------------------------------------------------/
+DOWN_4LINES_DE
+							ld	a,4
+							add	a,d
+							ld	d,a
+							and	7
+							ret	nz
+							ld	a,e
+							add	a,32
+							ld	e,a
+							ret	c
+							ld	a,d
+							sub	8
+							ld	d,a
+							ret
+;/-------------------------------------------------------------------------------------------/	
+INIT_SCR_ADR_TABLE
+							ld	de,(SCREEN_ADDRESS)
+							ld	hl,SCR_ADR_TABLE
+							ld	b,48
+INIT_SCR_ADR_TABLE2
+							ld	(HL),d
+							inc	hl
+							ld	(HL),e
+							inc	hl
+							call	DOWN_4LINES_DE
+							djnz	INIT_SCR_ADR_TABLE2
+							ret
+;/-------------------------------------------------------------------------------------------/	
+INIT_BYTETABLE
+							ld	hl,BYTETABLE
+							xor	a
+INIT_BYTETABLE2
+							ld	b,a
+
+							sla	a
+							sla	a
+							sla	a
+							sla	a
+							ld	(HL),a
+							inc	hl
+							ld	a,b
+							inc	a
+							jr	nz,INIT_BYTETABLE2
+
+							ret
+;/-------------------------------------------------------------------------------------------/	
+INIT_DRAW_LINE
+							ld	a,(BUFFER_WIDTH_MULTIPLIER)
+							ld	b,a
+							ld	hl,DRAW_LINE
+							ld	de,DRAW_LINE_END
+INIT_DRAW_LINE2
+							push	bc
+							ld	bc,DRAW_LINE_END-DRAW_LINE
+							ldir
+							pop	bc
+							djnz	INIT_DRAW_LINE2
+							ld	a,#C9
+							ld	(DE),a
+
+							; check that we didn't overwrite
+							ld hl, DRAW_LINE_BUFFER_END
+							or a
+							sbc hl, de
+							ret nc
+
+.error
+.error_color equ $+1
+							ld a, 2
+							xor 2
+							ld (.error_color), a
+							out ($fe), a
+							jr .error
+;/-------------------------------------------------------------------------------------------/
+							org	($-1)/256*256+256
+SCR_ADR_TABLE
+							ds	48*2
+
+							org	($-1)/256*256+256
+BYTETABLE
+							ds	256
+;/-------------------------------------------------------------------------------------------/
+DRAW_LINE
+							ld	c,(HL)
+							ld	a,(BC)
+							inc	l
+							or	(hl)
+							inc	l
+							exx
+
+							ld	e,a
+							ld	a,(DE)
+							ld	(HL),a
+							inc	h
+							inc	d
+							ld	a,(DE)
+							ld	(HL),a
+							inc	h
+							inc	d
+							ld	a,(DE)
+							ld	(HL),a
+							inc	h
+							inc	d
+							ld	a,(DE)
+							ld	(HL),a
+							inc	l
+							exx
+
+							ld	c,(HL)
+							ld	a,(BC)
+							inc	l
+							or	(hl)
+							inc	l
+							exx
+
+							ld	e,a
+							ld	a,(DE)
+							ld	(HL),a
+							dec	h
+							dec	d
+							ld	a,(DE)
+							ld	(HL),a
+							dec	h
+							dec	d
+							ld	a,(DE)
+							ld	(HL),a
+							dec	h
+							dec	d
+							ld	a,(DE)
+							ld	(HL),a
+							inc	l
+							exx
+DRAW_LINE_END
+							block 400
+DRAW_LINE_BUFFER_END
+						endmodule

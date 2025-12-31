@@ -1,0 +1,267 @@
+						module	effect2
+ball1_stepx					db	0
+ball1_stepy					db	15
+
+ball2_stepx					db	11
+ball2_stepy					db	3
+
+ball3_stepx					db	23
+ball3_stepy					db	20
+
+ball_color					equ	18
+
+ball
+; ================= BALL 1 =================
+							ld	a,(ball1_stepx)
+							inc	a
+							cp	32
+							jr	nz,b1x_ok
+							xor	a
+b1x_ok
+							ld	(ball1_stepx),a
+
+							ld	a,(ball1_stepy)
+							inc	a
+							cp	25
+							jr	nz,b1y_ok
+							xor	a
+b1y_ok
+							ld	(ball1_stepy),a
+
+							ld	a,(ball1_stepx)
+							ld	hl,sin_table_x
+							ld	l,a
+							ld	a,(hl)
+							ld	e,a
+
+							ld	hl,sin_table_y
+							ld	a,(ball1_stepy)
+							add	a,32
+							ld	l,a
+							ld	a,(hl)
+							ld	d,a
+
+							ld	hl,BUFFER_START
+							add	hl,de
+							call	ball_draw
+
+; ================= BALL 2 =================
+							ld	a,(ball2_stepx)
+							inc	a
+							cp	32
+							jr	nz,b2x_ok
+							xor	a
+b2x_ok
+							ld	(ball2_stepx),a
+
+							ld	a,(ball2_stepy)
+							inc	a
+							cp	25
+							jr	nz,b2y_ok
+							xor	a
+b2y_ok
+							ld	(ball2_stepy),a
+
+							ld	a,(ball2_stepx)
+							ld	hl,sin_table_x
+							ld	l,a
+							ld	a,(hl)
+							ld	e,a
+
+							ld	hl,sin_table_y
+							ld	a,(ball2_stepy)
+							add	a,32
+							ld	l,a
+							ld	a,(hl)
+							ld	d,a
+
+							ld	hl,BUFFER_START
+							add	hl,de
+							call	ball_draw
+
+; ================= BALL 3 =================
+							ld	a,(ball3_stepx)
+							inc	a
+							cp	32
+							jr	nz,b3x_ok
+							xor	a
+b3x_ok
+							ld	(ball3_stepx),a
+
+							ld	a,(ball3_stepy)
+							inc	a
+							cp	25
+							jr	nz,b3y_ok
+							xor	a
+b3y_ok
+							ld	(ball3_stepy),a
+
+							ld	a,(ball3_stepx)
+							ld	hl,sin_table_x
+							ld	l,a
+							ld	a,(hl)
+							ld	e,a
+
+							ld	hl,sin_table_y
+							ld	a,(ball3_stepy)
+							add	a,32
+							ld	l,a
+							ld	a,(hl)
+							ld	d,a
+
+							ld	hl,BUFFER_START
+							add	hl,de
+							call	ball_draw
+
+							ret
+; ------------------------------------------------------------
+ball_draw
+							ld	a,ball_color
+
+							push	hl
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							pop	hl
+							inc	h
+
+							push	hl
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							pop	hl
+							inc	h
+
+							push	hl
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							pop	hl
+							inc	h
+
+							push	hl
+							inc	l
+							ld	(hl),a
+							inc	l
+							ld	(hl),a
+							pop	hl
+							ret
+render
+
+							call	ball
+							call	blur
+							ret
+blur
+							ld	hl,@BUFFER_START+256
+							ld	c,@BUFFER_HEIGHT-1
+
+
+row
+							ld	b,BUFFER_WIDTH
+pixel
+							dec	h
+							ld	a,(hl)
+
+							inc	h
+							inc	l
+							add	(hl)
+
+							dec	l
+							dec	l
+							add	(hl)
+
+							inc	l
+							inc	h
+							add	(hl)
+
+							dec	h
+							srl	a
+							srl	a
+							or	a
+							jr	z,pixel_skip
+
+							cp 13
+							jr	c,pixel_skip
+							ld a,15
+pixel_skip
+							ld	(hl),a
+
+							inc	l
+							djnz	pixel
+							inc	h
+							ld	l,0
+
+							dec	c
+							jp	nz,row
+							ret
+							org	($-1)/256*256+256
+sin_table_x
+							db	16
+							db	19
+							db	21
+							db	24
+							db	26
+							db	28
+							db	30
+							db	31
+							db	31
+							db	31
+							db	30
+							db	28
+							db	26
+							db	24
+							db	21
+							db	19
+							db	16
+							db	12
+							db	10
+							db	7
+							db	5
+							db	3
+							db	1
+							db	0
+							db	0
+							db	0
+							db	1
+							db	3
+							db	5
+							db	7
+							db	10
+							db	12
+sin_table_y
+							db	11
+							db	13
+							db	16
+							db	18
+							db	19
+							db	21
+							db	21
+							db	21
+							db	20
+							db	19
+							db	17
+							db	15
+							db	12
+							db	10
+							db	7
+							db	5
+							db	3
+							db	2
+							db	1
+							db	1
+							db	1
+							db	3
+							db	4
+							db	6
+							db	9
+
+						endmodule

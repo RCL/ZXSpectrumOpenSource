@@ -1,0 +1,66 @@
+
+
+; In:
+;   HL = depacked sprite
+;   DE = target screen addr
+render_iris:
+        ld b, 24
+.outer_loop:
+        push bc
+
+        push de
+
+        ; de_to_attrs
+        ld a, d
+        and #18
+        rrca 
+        rrca
+        rrca
+        or #58
+        ld d, a
+
+        dup 16
+          ldi
+        edup
+
+        pop de
+
+        ld b, 8
+.loop:
+        ld a, e
+        ld c, #ff
+        dup 16
+          ldi
+        edup
+        ld e, a
+
+        ; down_de+
+        inc d
+        ld a, d
+        and 7
+        jr nz, .down_de_end
+        ld a, e
+        sub #e0
+        ld e, a
+        sbc a, a
+        and #f8
+        add a, d
+
+        cp #58
+        jr z, .end
+
+        ld d, a
+.down_de_end:
+
+        djnz .loop
+
+        pop bc
+        djnz .outer_loop
+
+        ret
+
+.end:
+        pop bc
+        ret
+
+
